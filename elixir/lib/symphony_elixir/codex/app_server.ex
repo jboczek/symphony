@@ -97,17 +97,13 @@ defmodule SymphonyElixir.Codex.AppServer do
         DynamicTool.execute(tool, arguments, dynamic_tool_binding, issue: issue)
       end)
 
-    case start_turn(
-           port,
-           thread_id,
-           prompt,
-           issue,
-           workspace,
-           model,
-           reasoning_effort,
-           approval_policy,
-           turn_sandbox_policy
-         ) do
+    turn_settings = %{
+      model: model,
+      reasoning_effort: reasoning_effort,
+      approval_policy: approval_policy
+    }
+
+    case start_turn(port, thread_id, prompt, issue, workspace, turn_settings, turn_sandbox_policy) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
@@ -372,9 +368,11 @@ defmodule SymphonyElixir.Codex.AppServer do
          prompt,
          issue,
          workspace,
-         model,
-         reasoning_effort,
-         approval_policy,
+         %{
+           model: model,
+           reasoning_effort: reasoning_effort,
+           approval_policy: approval_policy
+         },
          turn_sandbox_policy
        ) do
     params =
