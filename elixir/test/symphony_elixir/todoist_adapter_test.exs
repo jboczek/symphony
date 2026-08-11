@@ -4,6 +4,8 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
   alias SymphonyElixir.Todoist.Adapter
 
   defmodule FakeCLI do
+    alias SymphonyElixir.Todoist.AdapterTest
+
     @spec validate_settings(map()) :: :ok
     def validate_settings(settings) do
       send(Application.fetch_env!(:symphony_elixir, :todoist_test_pid), {:todoist_validate_settings, settings})
@@ -14,7 +16,7 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
     def list_tasks(_settings), do: {:ok, Application.get_env(:symphony_elixir, :todoist_test_tasks, [])}
 
     @spec current_scope(map()) :: {:ok, map()}
-    def current_scope(_settings), do: {:ok, SymphonyElixir.Todoist.AdapterTest.scope()}
+    def current_scope(_settings), do: {:ok, AdapterTest.scope()}
 
     @spec secret_environment_names(map()) :: [String.t()]
     def secret_environment_names(_settings), do: []

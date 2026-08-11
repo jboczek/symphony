@@ -1,6 +1,6 @@
 defmodule SymphonyElixir.Todoist.Adapter do
   @moduledoc """
-  Todoist-backed tracker adapter using project sections as issue states.
+  Tracker adapter backed by Todoist project sections as issue states.
   """
 
   @behaviour SymphonyElixir.Tracker
@@ -8,6 +8,7 @@ defmodule SymphonyElixir.Todoist.Adapter do
   require Logger
 
   alias SymphonyElixir.Config
+  alias SymphonyElixir.Todoist.AgentTool
   alias SymphonyElixir.Tracker.Issue
 
   @impl true
@@ -57,6 +58,12 @@ defmodule SymphonyElixir.Todoist.Adapter do
       |> normalize_requested_tasks(scope)
     end
   end
+
+  @impl true
+  def agent_tool_specs, do: AgentTool.tool_specs()
+
+  @impl true
+  def execute_agent_tool(tool, arguments, opts), do: AgentTool.execute(tool, arguments, opts)
 
   @impl true
   def secret_environment_names(tracker_settings) do
