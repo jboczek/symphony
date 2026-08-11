@@ -126,7 +126,7 @@ defmodule SymphonyElixir.Todoist.CLITest do
     assert {:ok, []} = CLI.decode_output_for_test("\n", :ndjson)
 
     assert {:ok, [%{"id" => "1"}, %{"id" => "2"}]} =
-             CLI.decode_output_for_test("{\"id\":\"1\"}\n{\"id\":\"2\"}\n", :ndjson)
+             CLI.decode_output_for_test(~s({"id":"1"}\n{"id":"2"}\n), :ndjson)
   end
 
   test "lists tasks by canonical project id and rejects foreign results" do

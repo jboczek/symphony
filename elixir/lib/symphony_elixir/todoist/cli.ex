@@ -36,14 +36,8 @@ defmodule SymphonyElixir.Todoist.CLI do
   def current_scope(tracker_settings) do
     with {:ok, project_name} <- configured_project_name(tracker_settings) do
       case :persistent_term.get(@scope_key, nil) do
-        %{project_name: ^project_name} = scope ->
-          {:ok, scope}
-
-        _ ->
-          with {:ok, scope} <- resolve_scope(tracker_settings, &run/1) do
-            :persistent_term.put(@scope_key, scope)
-            {:ok, scope}
-          end
+        %{project_name: ^project_name} = scope -> {:ok, scope}
+        _ -> resolve_and_cache_scope(tracker_settings)
       end
     end
   end
@@ -190,6 +184,13 @@ defmodule SymphonyElixir.Todoist.CLI do
          sections_by_name: sections_by_name,
          sections_by_id: sections_by_id
        }}
+    end
+  end
+
+  defp resolve_and_cache_scope(tracker_settings) do
+    with {:ok, scope} <- resolve_scope(tracker_settings, &run/1) do
+      :persistent_term.put(@scope_key, scope)
+      {:ok, scope}
     end
   end
 
@@ -505,9 +506,8 @@ defmodule SymphonyElixir.Todoist.CLI do
 
     with :ok <- reject_unknown_change_keys(attributes, allowed),
          {:ok, args} <- append_optional_text([], "--description", allowed["description"]),
-         {:ok, args} <- append_optional_labels(args, allowed["labels"]),
-         {:ok, args} <- append_optional_priority(args, allowed["priority"]) do
-      {:ok, args}
+         {:ok, args} <- append_optional_labels(args, allowed["labels"]) do
+      append_optional_priority(args, allowed["priority"])
     end
   end
 
