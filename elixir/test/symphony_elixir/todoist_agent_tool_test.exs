@@ -3,6 +3,35 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
 
   alias SymphonyElixir.Todoist.{Adapter, AgentTool}
 
+  defmodule FakeCLI do
+    @spec get_task(map(), String.t()) :: {:ok, map()}
+    def get_task(settings, task_id), do: result(:get_task, [settings, task_id])
+
+    @spec move_task(map(), String.t(), String.t()) :: {:ok, map()}
+    def move_task(settings, task_id, section), do: result(:move_task, [settings, task_id, section])
+
+    @spec update_task(map(), String.t(), map()) :: {:ok, map()}
+    def update_task(settings, task_id, changes), do: result(:update_task, [settings, task_id, changes])
+
+    @spec create_task(map(), String.t(), map()) :: {:ok, map()}
+    def create_task(settings, content, attributes), do: result(:create_task, [settings, content, attributes])
+
+    @spec list_comments(map(), String.t()) :: {:ok, [map()]}
+    def list_comments(settings, task_id), do: result(:list_comments, [settings, task_id])
+
+    @spec create_comment(map(), String.t(), String.t()) :: {:ok, map()}
+    def create_comment(settings, task_id, content), do: result(:create_comment, [settings, task_id, content])
+
+    @spec update_comment(map(), String.t(), String.t()) :: {:ok, map()}
+    def update_comment(settings, comment_id, content),
+      do: result(:update_comment, [settings, comment_id, content])
+
+    defp result(operation, arguments) do
+      send(Application.fetch_env!(:symphony_elixir, :todoist_tool_test_pid), {operation, arguments})
+      {:ok, if(operation == :list_comments, do: [], else: %{"operation" => Atom.to_string(operation)})}
+    end
+  end
+
   @tracker_settings %{
     kind: "todoist",
     provider: %{"project" => "_agents"},
@@ -108,6 +137,62 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
            )
 
     assert_received {:todoist_client, :comment_create, %{task_id: "task-1", content: "Result"}, @tracker_settings}
+
+    assert success?(
+             AgentTool.execute(
+               "todoist",
+               %{"operation" => "task_update", "task_id" => "task-1", "description" => "Updated"},
+               tracker_settings: @tracker_settings,
+               todoist_client: client
+             )
+           )
+
+    assert_received {:todoist_client, :task_update, %{task_id: "task-1", changes: %{"description" => "Updated"}}, @tracker_settings}
+
+    assert success?(
+             AgentTool.execute(
+               "todoist",
+               %{"operation" => "comment_list", "task_id" => "task-1"},
+               tracker_settings: @tracker_settings,
+               todoist_client: client
+             )
+           )
+
+    assert_received {:todoist_client, :comment_list, %{task_id: "task-1"}, @tracker_settings}
+  end
+
+  test "default client dispatches every allowlisted operation through the typed CLI module" do
+    previous_cli = Application.get_env(:symphony_elixir, :todoist_cli_module)
+    previous_pid = Application.get_env(:symphony_elixir, :todoist_tool_test_pid)
+    Application.put_env(:symphony_elixir, :todoist_cli_module, FakeCLI)
+    Application.put_env(:symphony_elixir, :todoist_tool_test_pid, self())
+
+    on_exit(fn ->
+      restore_app_env(:todoist_cli_module, previous_cli)
+      restore_app_env(:todoist_tool_test_pid, previous_pid)
+    end)
+
+    operations = [
+      %{"operation" => "task_get", "task_id" => "task-1"},
+      %{"operation" => "task_move", "task_id" => "task-1", "section" => "InProgress"},
+      %{"operation" => "task_update", "task_id" => "task-1", "content" => "Updated"},
+      %{"operation" => "task_create", "content" => "Created"},
+      %{"operation" => "comment_list", "task_id" => "task-1"},
+      %{"operation" => "comment_create", "task_id" => "task-1", "content" => "Created"},
+      %{"operation" => "comment_update", "comment_id" => "comment-1", "content" => "Updated"}
+    ]
+
+    assert Enum.all?(operations, fn arguments ->
+             AgentTool.execute("todoist", arguments, tracker_settings: @tracker_settings)["success"]
+           end)
+
+    assert_received {:get_task, [@tracker_settings, "task-1"]}
+    assert_received {:move_task, [@tracker_settings, "task-1", "InProgress"]}
+    assert_received {:update_task, [@tracker_settings, "task-1", %{"content" => "Updated"}]}
+    assert_received {:create_task, [@tracker_settings, "Created", %{}]}
+    assert_received {:list_comments, [@tracker_settings, "task-1"]}
+    assert_received {:create_comment, [@tracker_settings, "task-1", "Created"]}
+    assert_received {:update_comment, [@tracker_settings, "comment-1", "Updated"]}
   end
 
   test "discovers and updates the same Workpad comment" do
@@ -193,6 +278,38 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
       )
 
     refute duplicate["success"]
+
+    for comments <- [
+          [%{"content" => "## Codex Workpad\nmissing id"}],
+          "not-a-list"
+        ] do
+      invalid_payload =
+        AgentTool.execute(
+          "todoist",
+          %{"operation" => "workpad_upsert", "task_id" => "task-1", "content" => content},
+          tracker_settings: @tracker_settings,
+          todoist_client: fn :comment_list, %{task_id: "task-1"}, @tracker_settings ->
+            {:ok, comments}
+          end
+        )
+
+      refute invalid_payload["success"]
+    end
+
+    non_string_comment_client = fn
+      :comment_list, %{task_id: "task-1"}, @tracker_settings ->
+        {:ok, [%{"id" => "other", "content" => nil}]}
+
+      :comment_create, %{task_id: "task-1", content: ^content}, @tracker_settings ->
+        {:ok, %{"id" => "created-workpad", "content" => content}}
+    end
+
+    assert AgentTool.execute(
+             "todoist",
+             %{"operation" => "workpad_upsert", "task_id" => "task-1", "content" => content},
+             tracker_settings: @tracker_settings,
+             todoist_client: non_string_comment_client
+           )["success"]
   end
 
   test "rejects destructive, malformed, and scope-override arguments before execution" do
@@ -201,8 +318,12 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
     for arguments <- [
           %{"operation" => "task_complete", "task_id" => "task-1"},
           %{"operation" => "task_move", "task_id" => "task-1"},
+          %{"operation" => "task_update", "task_id" => "task-1"},
+          %{"operation" => "task_update", "task_id" => "task-1", "labels" => [1]},
+          %{"operation" => "task_update", "task_id" => "task-1", "priority" => 1},
           %{"operation" => "task_create", "content" => "Nope", "project_id" => "other"},
           %{"operation" => "comment_update", "comment_id" => "comment-1"},
+          %{"operation" => "workpad_upsert", "task_id" => "task-1"},
           "not-an-object"
         ] do
       response =
@@ -234,7 +355,32 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
     refute response["output"] =~ "super-secret"
     refute response["output"] =~ "token="
     assert response["contentItems"] == [%{"type" => "inputText", "text" => response["output"]}]
+
+    for reason <- [{:transport, "details"}, "opaque failure"] do
+      failure =
+        AgentTool.execute(
+          "todoist",
+          %{"operation" => "task_get", "task_id" => "task-1"},
+          tracker_settings: @tracker_settings,
+          todoist_client: fn _operation, _payload, _settings -> {:error, reason} end
+        )
+
+      refute failure["success"]
+    end
+
+    json_unsafe =
+      AgentTool.execute(
+        "todoist",
+        %{"operation" => "task_get", "task_id" => "task-1"},
+        tracker_settings: @tracker_settings,
+        todoist_client: fn _operation, _payload, _settings -> {:ok, self()} end
+      )
+
+    assert json_unsafe["output"] =~ "Todoist result was not JSON-safe"
   end
 
   defp success?(response), do: response["success"] == true
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
+  defp restore_app_env(key, value), do: Application.put_env(:symphony_elixir, key, value)
 end
