@@ -564,7 +564,7 @@ defmodule SymphonyElixir.Todoist.CLI do
 
   defp decode_output(output, :ndjson) when is_binary(output) do
     output
-    |> String.split(~r/\R/, trim: true)
+    |> String.split(["\r\n", "\n", "\r"], trim: true)
     |> Enum.reduce_while({:ok, []}, fn line, {:ok, decoded} ->
       case Jason.decode(line) do
         {:ok, value} -> {:cont, {:ok, [value | decoded]}}
