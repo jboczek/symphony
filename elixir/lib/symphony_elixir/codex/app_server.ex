@@ -14,6 +14,8 @@ defmodule SymphonyElixir.Codex.AppServer do
   @type session :: %{
           port: port(),
           metadata: map(),
+          model: String.t() | nil,
+          reasoning_effort: String.t() | nil,
           approval_policy: String.t() | map(),
           auto_approve_requests: boolean(),
           thread_sandbox: String.t(),
@@ -51,6 +53,8 @@ defmodule SymphonyElixir.Codex.AppServer do
          %{
            port: port,
            metadata: metadata,
+           model: session_policies.model,
+           reasoning_effort: session_policies.reasoning_effort,
            approval_policy: session_policies.approval_policy,
            auto_approve_requests: session_policies.approval_policy == "never",
            thread_sandbox: session_policies.thread_sandbox,
@@ -73,6 +77,8 @@ defmodule SymphonyElixir.Codex.AppServer do
         %{
           port: port,
           metadata: metadata,
+          model: model,
+          reasoning_effort: reasoning_effort,
           approval_policy: approval_policy,
           auto_approve_requests: auto_approve_requests,
           turn_sandbox_policy: turn_sandbox_policy,
@@ -91,7 +97,17 @@ defmodule SymphonyElixir.Codex.AppServer do
         DynamicTool.execute(tool, arguments, dynamic_tool_binding, issue: issue)
       end)
 
-    case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
+    case start_turn(
+           port,
+           thread_id,
+           prompt,
+           issue,
+           workspace,
+           model,
+           reasoning_effort,
+           approval_policy,
+           turn_sandbox_policy
+         ) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
@@ -314,18 +330,28 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp start_thread(
          port,
          workspace,
-         %{approval_policy: approval_policy, thread_sandbox: thread_sandbox},
+         %{
+           model: model,
+           reasoning_effort: reasoning_effort,
+           approval_policy: approval_policy,
+           thread_sandbox: thread_sandbox
+         },
          dynamic_tool_binding
        ) do
-    send_message(port, %{
-      "method" => "thread/start",
-      "id" => @thread_start_id,
-      "params" => %{
+    params =
+      %{
         "approvalPolicy" => approval_policy,
         "sandbox" => thread_sandbox,
         "cwd" => workspace,
         "dynamicTools" => dynamic_tool_binding.tool_specs
       }
+      |> maybe_put_model(model)
+      |> maybe_put_reasoning_effort(reasoning_effort)
+
+    send_message(port, %{
+      "method" => "thread/start",
+      "id" => @thread_start_id,
+      "params" => params
     })
 
     case await_response(port, @thread_start_id) do
@@ -340,11 +366,19 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
-    send_message(port, %{
-      "method" => "turn/start",
-      "id" => @turn_start_id,
-      "params" => %{
+  defp start_turn(
+         port,
+         thread_id,
+         prompt,
+         issue,
+         workspace,
+         model,
+         reasoning_effort,
+         approval_policy,
+         turn_sandbox_policy
+       ) do
+    params =
+      %{
         "threadId" => thread_id,
         "input" => [
           %{
@@ -357,6 +391,13 @@ defmodule SymphonyElixir.Codex.AppServer do
         "approvalPolicy" => approval_policy,
         "sandboxPolicy" => turn_sandbox_policy
       }
+      |> maybe_put("model", model)
+      |> maybe_put("effort", reasoning_effort)
+
+    send_message(port, %{
+      "method" => "turn/start",
+      "id" => @turn_start_id,
+      "params" => params
     })
 
     case await_response(port, @turn_start_id) do
@@ -364,6 +405,23 @@ defmodule SymphonyElixir.Codex.AppServer do
       other -> other
     end
   end
+
+  defp maybe_put_model(params, nil), do: params
+
+  defp maybe_put_model(params, model) do
+    params
+    |> Map.put("model", model)
+    |> Map.put("allowProviderModelFallback", false)
+  end
+
+  defp maybe_put_reasoning_effort(params, nil), do: params
+
+  defp maybe_put_reasoning_effort(params, reasoning_effort) do
+    Map.put(params, "config", %{"model_reasoning_effort" => reasoning_effort})
+  end
+
+  defp maybe_put(params, _key, nil), do: params
+  defp maybe_put(params, key, value), do: Map.put(params, key, value)
 
   defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
     receive_loop(

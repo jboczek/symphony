@@ -16,6 +16,8 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
 
     assert settings.codex.command =~ "--model gpt-5.6-luna"
     assert settings.codex.command =~ "model_reasoning_effort=xhigh"
+    assert settings.codex.model == "gpt-5.6-luna"
+    assert settings.codex.reasoning_effort == "xhigh"
     assert settings.codex.approval_policy == "never"
     assert settings.codex.thread_sandbox == "workspace-write"
 

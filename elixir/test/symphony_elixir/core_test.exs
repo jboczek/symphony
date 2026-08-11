@@ -2067,7 +2067,9 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{codex_binary} app-server",
+        codex_model: "gpt-5.6-luna",
+        codex_reasoning_effort: "xhigh"
       )
 
       issue = %Issue{
@@ -2107,6 +2109,9 @@ defmodule SymphonyElixir.CoreTest do
                    }
 
                    payload["method"] == "thread/start" &&
+                     get_in(payload, ["params", "model"]) == "gpt-5.6-luna" &&
+                     get_in(payload, ["params", "config", "model_reasoning_effort"]) == "xhigh" &&
+                     get_in(payload, ["params", "allowProviderModelFallback"]) == false &&
                      get_in(payload, ["params", "approvalPolicy"]) == expected_approval_policy &&
                      get_in(payload, ["params", "sandbox"]) == "workspace-write" &&
                      get_in(payload, ["params", "cwd"]) == canonical_workspace
@@ -2140,6 +2145,8 @@ defmodule SymphonyElixir.CoreTest do
                    }
 
                    payload["method"] == "turn/start" &&
+                     get_in(payload, ["params", "model"]) == "gpt-5.6-luna" &&
+                     get_in(payload, ["params", "effort"]) == "xhigh" &&
                      get_in(payload, ["params", "cwd"]) == canonical_workspace &&
                      get_in(payload, ["params", "approvalPolicy"]) == expected_approval_policy &&
                      get_in(payload, ["params", "sandboxPolicy"]) == expected_turn_sandbox_policy
