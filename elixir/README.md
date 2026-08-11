@@ -14,7 +14,7 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 ## How it works
 
 1. Polls the configured tracker for candidate work (included adapters: Linear, GitHub Issues, Jira
-   Cloud, Asana, and GitLab)
+   Cloud, Asana, Todoist, and GitLab)
 2. Creates a workspace per issue
 3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
    workspace
@@ -23,9 +23,10 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 
 During app-server sessions, the selected tracker adapter may advertise provider-native tools. The
 Linear serves `linear_graphql`, GitHub Issues serves `github_api`, Jira Cloud serves
-`jira_rest`, Asana serves `asana_api`, and GitLab serves `gitlab_api`. Symphony executes those
-tools with configured host-side auth and removes declared tracker-token environment variables from
-the Codex child, so the agent does not need a second tracker login.
+`jira_rest`, Asana serves `asana_api`, Todoist serves the constrained `todoist` workflow tool, and
+GitLab serves `gitlab_api`. Symphony executes those tools with configured host-side auth and
+removes declared tracker-token environment variables from the Codex child, so the agent does not
+need a second tracker login.
 
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
@@ -72,6 +73,13 @@ mise install
 mise exec -- mix setup
 mise exec -- mix build
 mise exec -- ./bin/symphony ./WORKFLOW.md
+```
+
+For the included Todoist `_agents` profile, use the locally authenticated official `td` CLI:
+
+```bash
+td auth status
+mise exec -- ./bin/symphony ./WORKFLOW.todoist.md
 ```
 
 ## Burrito releases
@@ -279,6 +287,30 @@ codex:
   strips `ASANA_PAT` and configured token variables from the Codex child, while raw tool calls are
   not limited to the configured project.
 
+### Todoist adapter
+
+- Config: use `tracker.kind: todoist` with `tracker.provider.project` (default `_agents`). The
+  adapter uses the authenticated official `td` executable; no Todoist token belongs in the workflow
+  or the Codex environment.
+- Startup validation: the project name must resolve uniquely. Its `Backlog`, `Todo`, `InProgress`,
+  `HumanReview`, `Rework`, `Merging`, and `Done` sections must already exist exactly once. Startup
+  never creates, renames, archives, or deletes project structure.
+- Scope: the adapter resolves and caches the canonical project and section IDs, scopes CLI reads to
+  that project, and revalidates every returned task, destination section, and comment parent before
+  mutation. New tasks are forced into `_agents` / `Backlog`.
+- States and issues: the task's section is its state; `TODOIST-<task-id>` is its Symphony identifier;
+  labels, priority, timestamps, URL, and native project/task/section IDs are normalized; Todoist
+  parent/subtask relations do not become blockers.
+- Tool: the structured `todoist` tool exposes only task get/move/update/create, comment
+  list/create/update, and persistent Workpad upsert. It does not expose arbitrary CLI, completion,
+  deletion, archive, project, or section operations. `workpad_upsert` reuses the one comment that
+  begins exactly `## Codex Workpad`.
+- Errors: missing executable, unauthenticated CLI, timeouts, non-zero exits, malformed structured
+  output, ambiguous/missing scope, missing sections, and cross-project access return structured
+  failures. Tool-facing failures do not include CLI diagnostics or credentials.
+- Runnable profile: `WORKFLOW.todoist.md` uses GPT-5.6 Luna at `xhigh`, approval policy `never`, a
+  workspace-write turn sandbox with network access, and the existing `_agents` section lifecycle.
+
 ### GitLab adapter
 
 - Configure `tracker.kind: gitlab` with `tracker.provider.project_path`, optional `api_url`, and
@@ -302,6 +334,7 @@ The observability UI now runs on a minimal Phoenix stack:
 - `lib/`: application code and Mix tasks
 - `test/`: ExUnit coverage for runtime behavior
 - `WORKFLOW.md`: in-repo workflow contract used by local runs
+- `WORKFLOW.todoist.md`: runnable Todoist `_agents` workflow profile
 - `../.codex/`: repository-local Codex skills and setup helpers
 
 ## Testing
