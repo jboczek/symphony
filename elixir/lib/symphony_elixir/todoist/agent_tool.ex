@@ -6,7 +6,7 @@ defmodule SymphonyElixir.Todoist.AgentTool do
   section, archive, or account operation.
   """
 
-  alias SymphonyElixir.{Config, Todoist.CLI}
+  alias SymphonyElixir.Config
 
   @tool_name "todoist"
   @workpad_marker "## Codex Workpad"
@@ -236,25 +236,29 @@ defmodule SymphonyElixir.Todoist.AgentTool do
 
   defp workpad_content?(_content), do: false
 
-  defp call_cli(:task_get, %{task_id: task_id}, settings), do: CLI.get_task(settings, task_id)
+  defp call_cli(:task_get, %{task_id: task_id}, settings), do: cli_module().get_task(settings, task_id)
 
   defp call_cli(:task_move, %{task_id: task_id, section: section}, settings),
-    do: CLI.move_task(settings, task_id, section)
+    do: cli_module().move_task(settings, task_id, section)
 
   defp call_cli(:task_update, %{task_id: task_id, changes: changes}, settings),
-    do: CLI.update_task(settings, task_id, changes)
+    do: cli_module().update_task(settings, task_id, changes)
 
   defp call_cli(:task_create, %{content: content, attributes: attributes}, settings),
-    do: CLI.create_task(settings, content, attributes)
+    do: cli_module().create_task(settings, content, attributes)
 
   defp call_cli(:comment_list, %{task_id: task_id}, settings),
-    do: CLI.list_comments(settings, task_id)
+    do: cli_module().list_comments(settings, task_id)
 
   defp call_cli(:comment_create, %{task_id: task_id, content: content}, settings),
-    do: CLI.create_comment(settings, task_id, content)
+    do: cli_module().create_comment(settings, task_id, content)
 
   defp call_cli(:comment_update, %{comment_id: comment_id, content: content}, settings),
-    do: CLI.update_comment(settings, comment_id, content)
+    do: cli_module().update_comment(settings, comment_id, content)
+
+  defp cli_module do
+    Application.get_env(:symphony_elixir, :todoist_cli_module, SymphonyElixir.Todoist.CLI)
+  end
 
   defp success_response(payload), do: dynamic_tool_response(true, encode_payload(payload))
 

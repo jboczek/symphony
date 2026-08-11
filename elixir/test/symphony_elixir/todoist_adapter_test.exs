@@ -94,6 +94,21 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
     assert Adapter.normalize_issue_for_test(Map.put(task("49"), "parentId", "42"), scope()).blocked_by == []
     assert Adapter.normalize_issue_for_test(Map.put(task("50"), "sectionId", "unknown"), scope()) == nil
     assert Adapter.normalize_issue_for_test(task("51", "other-project"), scope()) == nil
+
+    sparse =
+      task("52")
+      |> Map.put("description", " ")
+      |> Map.put("labels", nil)
+      |> Map.put("addedAt", "not-a-timestamp")
+      |> Map.put("updatedAt", nil)
+
+    sparse_issue = Adapter.normalize_issue_for_test(sparse, scope())
+    assert sparse_issue.description == nil
+    assert sparse_issue.labels == []
+    assert sparse_issue.created_at == nil
+    assert sparse_issue.updated_at == nil
+
+    assert Adapter.normalize_issue_for_test(Map.put(task("53"), "description", nil), scope()).description == nil
   end
 
   test "fetches requested states and IDs while dropping or rejecting malformed records" do
@@ -137,6 +152,24 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
 
     assert {:error, {:todoist_cross_project_task, "foreign"}} =
              Adapter.fetch_issues_by_ids(["foreign"])
+
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, [42])
+    assert {:error, :todoist_unknown_payload} = Adapter.fetch_issues_by_states(["Todo"])
+
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, "not-a-list")
+    assert {:error, :todoist_unknown_payload} = Adapter.fetch_issues_by_states(["Todo"])
+  end
+
+  test "ignores non-string requested states" do
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, [task("todo")])
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "todoist",
+      tracker_active_states: ["Todo"],
+      tracker_terminal_states: ["Done"]
+    )
+
+    assert {:ok, []} = Adapter.fetch_issues_by_states([42])
   end
 
   @spec scope() :: map()
