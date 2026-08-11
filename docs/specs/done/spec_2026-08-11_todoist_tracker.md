@@ -1,7 +1,7 @@
 ---
 title: Todoist tracker integration
 summary: Add a project-scoped Todoist tracker backed by the official td CLI and prove it with the live _agents workflow.
-status: in_progress
+status: done
 ---
 
 # Todoist tracker integration
@@ -63,78 +63,78 @@ using task completion as state would make terminal work disappear from normal pr
 
 ### Repository and configuration
 
-- [ ] The local repository is the `jboczek/symphony` fork with `openai/symphony` configured as
+- [x] The local repository is the `jboczek/symphony` fork with `openai/symphony` configured as
   `upstream`, inside the original start directory.
-- [ ] `tracker.kind: todoist` is registered without provider branches in the orchestrator.
-- [ ] Omitted Todoist project configuration defaults to `_agents`; a non-string/blank project is
+- [x] `tracker.kind: todoist` is registered without provider branches in the orchestrator.
+- [x] Omitted Todoist project configuration defaults to `_agents`; a non-string/blank project is
   rejected.
-- [ ] Startup resolves exactly one active `_agents` project and caches its canonical ID for the
+- [x] Startup resolves exactly one active `_agents` project and caches its canonical ID for the
   effective configuration; missing and ambiguous matches fail clearly.
-- [ ] Startup verifies the exact sections `Backlog`, `Todo`, `InProgress`, `HumanReview`, `Rework`,
+- [x] Startup verifies the exact sections `Backlog`, `Todo`, `InProgress`, `HumanReview`, `Rework`,
   `Merging`, and `Done`, rejects missing/ambiguous/cross-project sections, and performs no structure
   mutation.
-- [ ] The runnable workflow uses active states `Todo`, `InProgress`, `Rework`, `Merging`, terminal
+- [x] The runnable workflow uses active states `Todo`, `InProgress`, `Rework`, `Merging`, terminal
   state `Done`, and does not dispatch `Backlog` or `HumanReview`.
 
 ### CLI and tracker behavior
 
-- [ ] The implementation executes the installed `td` executable with argv, never interpolated
+- [x] The implementation executes the installed `td` executable with argv, never interpolated
   shell commands, and uses JSON/NDJSON wherever supported.
-- [ ] Missing executable, unauthenticated status, non-zero exit, timeout, malformed JSON, and
+- [x] Missing executable, unauthenticated status, non-zero exit, timeout, malformed JSON, and
   malformed NDJSON return structured non-secret errors.
-- [ ] Candidate and ID reads are CLI-filtered by canonical project ID and independently reject any
+- [x] Candidate and ID reads are CLI-filtered by canonical project ID and independently reject any
   returned task whose `projectId` differs.
-- [ ] Empty state/ID reads return `{:ok, []}` without invoking `td`.
-- [ ] Todoist tasks normalize to the current `Issue` contract with `TODOIST-<id>`, section state,
+- [x] Empty state/ID reads return `{:ok, []}` without invoking `td`.
+- [x] Todoist tasks normalize to the current `Issue` contract with `TODOIST-<id>`, section state,
   lowercase/deduplicated labels, Todoist-to-Symphony priority ordering, timestamps, URL,
   project/task/section native refs, explicit dispatchability, and `blocked_by: []`.
-- [ ] Todoist task completion is never used as the workflow transition to `Done`.
-- [ ] `InProgress` items remain discoverable, `Rework` is dispatchable, `HumanReview` is not active,
+- [x] Todoist task completion is never used as the workflow transition to `Done`.
+- [x] `InProgress` items remain discoverable, `Rework` is dispatchable, `HumanReview` is not active,
   and `Done` is terminal.
 
 ### Agent tool and safety
 
-- [ ] The agent receives only one structured `todoist` tool with a closed operation enum; it cannot
+- [x] The agent receives only one structured `todoist` tool with a closed operation enum; it cannot
   execute arbitrary `td` arguments.
-- [ ] The tool supports only required task/comment/Workpad operations and exposes no task complete,
+- [x] The tool supports only required task/comment/Workpad operations and exposes no task complete,
   uncomplete, delete, project/section mutation, archive, or arbitrary account operation.
-- [ ] Task mutations first verify `task.projectId == configured_project_id`.
-- [ ] Section moves use a cached section owned by `_agents` and reject foreign or unknown sections.
-- [ ] Comment updates resolve the parent task and verify that task belongs to `_agents`.
-- [ ] Task creation always supplies canonical `_agents` project and `Backlog` section IDs; callers
+- [x] Task mutations first verify `task.projectId == configured_project_id`.
+- [x] Section moves use a cached section owned by `_agents` and reject foreign or unknown sections.
+- [x] Comment updates resolve the parent task and verify that task belongs to `_agents`.
+- [x] Task creation always supplies canonical `_agents` project and `Backlog` section IDs; callers
   cannot override either.
-- [ ] Workpad upsert discovers the comment whose content begins exactly `## Codex Workpad`, reuses
+- [x] Workpad upsert discovers the comment whose content begins exactly `## Codex Workpad`, reuses
   and updates it, or creates one when absent without progress-comment spam.
-- [ ] Dynamic-tool results never contain Todoist credentials and the adapter declares no token
+- [x] Dynamic-tool results never contain Todoist credentials and the adapter declares no token
   environment because authentication remains inside the local CLI profile.
 
 ### Workflow and Codex runtime
 
-- [ ] A Todoist workflow preserves the reference workflow's unattended planning, reproduction,
+- [x] A Todoist workflow preserves the reference workflow's unattended planning, reproduction,
   implementation, validation, self-review, acceptance audit, persistent Workpad, active-task
   persistence, Rework recovery, and HumanReview quality gate.
-- [ ] `Todo -> InProgress` occurs before work; completed/verified work moves to `HumanReview`; Rework
+- [x] `Todo -> InProgress` occurs before work; completed/verified work moves to `HumanReview`; Rework
   reuses the workspace and Workpad; no code/content change occurs merely because an item is already
   in `HumanReview`.
-- [ ] The effective App Server command explicitly selects `gpt-5.6-luna` and `xhigh`; startup and a
+- [x] The effective App Server command explicitly selects `gpt-5.6-luna` and `xhigh`; startup and a
   real thread prove that the installed Codex accepts them without fallback.
-- [ ] Effective runtime policies are `approval_policy: never`, thread sandbox `workspace-write`, and
+- [x] Effective runtime policies are `approval_policy: never`, thread sandbox `workspace-write`, and
   turn sandbox `workspaceWrite` with network enabled and per-task workspace isolation.
 
 ### Automated and live verification
 
-- [ ] Focused tests cover registration, configuration, scope/section discovery, task reads and
+- [x] Focused tests cover registration, configuration, scope/section discovery, task reads and
   normalization, JSON/NDJSON/error handling, state behavior, Workpad lifecycle, project guards,
   forced task creation, absent destructive operations, and secret-safe results.
-- [ ] Existing adapter/orchestrator/workspace/App Server behavior remains green under formatting,
+- [x] Existing adapter/orchestrator/workspace/App Server behavior remains green under formatting,
   specs, lint, coverage, Dialyzer, and the full test suite.
-- [ ] A real Symphony run discovers and dispatches the existing `Komentarz` and `Research ADF`
+- [x] A real Symphony run discovers and dispatches the existing `Komentarz` and `Research ADF`
   tasks from `Todo` through normal scheduler concurrency.
-- [ ] `Komentarz` receives its requested comment; `Research ADF` receives a short, sourced connector
+- [x] `Komentarz` receives its requested comment; `Research ADF` receives a short, sourced connector
   summary and a documented estimate for the described daily two-million-row ADX flow.
-- [ ] Each real task has one recoverable Workpad, validation evidence, and an accurate final state;
+- [x] Each real task has one recoverable Workpad, validation evidence, and an accurate final state;
   a genuinely blocked task records the precise blocker instead of claiming success.
-- [ ] Final read-only inspection confirms `_agents` was the only project modified, no unrelated
+- [x] Final read-only inspection confirms `_agents` was the only project modified, no unrelated
   task changed, and no destructive Todoist operation or credential exposure occurred.
 
 ## Implementation notes
@@ -161,21 +161,34 @@ using task completion as state would make terminal work disappear from normal pr
 - Preserve behavior outside Todoist and add no dependency unless the standard library/current
   dependencies cannot satisfy the boundary.
 
+## Verification evidence
+
+- Repository gates passed at `f221485`: 316 tests, 0 failures, 6 skipped, 100% coverage; build,
+  formatting, strict Credo, public-spec checks, and Dialyzer all passed.
+- The live scheduler discovered both existing `Todo` tasks concurrently and used distinct
+  per-task workspaces.
+- Effective runtime records prove `gpt-5.6-luna`, `xhigh`, approval `never`, workspace-write, and
+  network-enabled turn sandboxing after explicit model enforcement disabled provider fallback.
+- Final Todoist inspection found only `Komentarz` and `Research ADF` in `_agents`; both are
+  unchecked in `HumanReview`, each has one recoverable Workpad, and each has its requested
+  deliverable comment.
+- The seven pre-existing sections remain active and unchanged; no completion, deletion, archive,
+  project creation, or access outside `_agents` was performed.
+
 ## Tasks
 
-- [ ] Commit 1 — add CLI/scope tests, implement typed `td` execution, parsing, startup resolution,
+- [x] Commit 1 — add CLI/scope tests, implement typed `td` execution, parsing, startup resolution,
   section verification, scoped reads/mutations, and run focused tests.
-- [ ] Commit 2 — add tracker registration/adapter tests, implement normalization and adapter
+- [x] Commit 2 — add tracker registration/adapter tests, implement normalization and adapter
   delegation, and run focused plus existing tracker tests.
-- [ ] Commit 3 — add tool/Workpad safety tests, implement the closed operation tool and ownership
+- [x] Commit 3 — add tool/Workpad safety tests, implement the closed operation tool and ownership
   guards, and run focused tool tests.
-- [ ] Commit 4 — add `elixir/WORKFLOW.todoist.md` and adapter documentation, validate config/model
+- [x] Commit 4 — add `elixir/WORKFLOW.todoist.md` and adapter documentation, validate config/model
   schema, formatting, and static documentation checks.
-- [ ] Run `make all` and all relevant/full regression tests; fix only task-owned failures.
-- [ ] Checkpoint before external mutation, record the two task IDs/initial states, and start Symphony
+- [x] Run `make all` and all relevant/full regression tests; fix only task-owned failures.
+- [x] Checkpoint before external mutation, record the two task IDs/initial states, and start Symphony
   with the Todoist workflow.
-- [ ] Observe both real dispatches, verify requested work and Workpads, and inspect final Todoist
+- [x] Observe both real dispatches, verify requested work and Workpads, and inspect final Todoist
   state/safety invariants.
-- [ ] Audit every acceptance criterion against direct evidence, update this spec to `done`, move it
+- [x] Audit every acceptance criterion against direct evidence, update this spec to `done`, move it
   to `docs/specs/done/`, make the lifecycle commit, and update the canonical checkpoint.
-
