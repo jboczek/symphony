@@ -173,7 +173,12 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            "method" => "thread/tokenUsage/updated",
            "params" => %{
              "tokenUsage" => %{
-               "total" => %{"inputTokens" => 12, "outputTokens" => 4, "totalTokens" => 16}
+               "total" => %{
+                 "inputTokens" => 12,
+                 "cachedInputTokens" => 3,
+                 "outputTokens" => 4,
+                 "totalTokens" => 16
+               }
              }
            }
          },
@@ -182,22 +187,110 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
        }}
     )
 
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :notification,
+         payload: %{
+           "method" => "thread/tokenUsage/updated",
+           "params" => %{
+             "tokenUsage" => %{
+               "total" => %{
+                 "inputTokens" => 20,
+                 "cachedInputTokens" => 5,
+                 "outputTokens" => 6,
+                 "totalTokens" => 26
+               }
+             }
+           }
+         },
+         timestamp: now
+       }}
+    )
+
     snapshot = GenServer.call(pid, :snapshot)
     assert %{running: [snapshot_entry]} = snapshot
     assert snapshot_entry.codex_app_server_pid == "4242"
-    assert snapshot_entry.codex_input_tokens == 12
-    assert snapshot_entry.codex_output_tokens == 4
-    assert snapshot_entry.codex_total_tokens == 16
+    assert snapshot_entry.codex_input_tokens == 20
+    assert snapshot_entry.codex_cached_input_tokens == 5
+    assert snapshot_entry.codex_output_tokens == 6
+    assert snapshot_entry.codex_total_tokens == 26
     assert snapshot_entry.turn_count == 1
     assert is_integer(snapshot_entry.runtime_seconds)
 
     send(pid, {:DOWN, process_ref, :process, self(), :normal})
     completed_state = :sys.get_state(pid)
 
-    assert completed_state.codex_totals.input_tokens == 12
-    assert completed_state.codex_totals.output_tokens == 4
-    assert completed_state.codex_totals.total_tokens == 16
+    assert completed_state.codex_totals.input_tokens == 20
+    assert completed_state.codex_totals.cached_input_tokens == 5
+    assert completed_state.codex_totals.output_tokens == 6
+    assert completed_state.codex_totals.total_tokens == 26
     assert is_integer(completed_state.codex_totals.seconds_running)
+  end
+
+  test "orchestrator retains the latest 50 completed sessions across all exit reasons" do
+    orchestrator_name = Module.concat(__MODULE__, :CompletedSessionsOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    entries =
+      Enum.into(1..51, %{}, fn index ->
+        issue_id = "issue-completed-#{index}"
+        identifier = "MT-#{String.pad_leading(Integer.to_string(index), 3, "0")}"
+
+        issue = %Issue{
+          id: issue_id,
+          identifier: identifier,
+          title: "Completed session #{index}",
+          state: "In Progress",
+          url: "https://example.org/issues/#{identifier}"
+        }
+
+        {issue_id,
+         %{
+           pid: self(),
+           ref: make_ref(),
+           identifier: identifier,
+           issue: issue,
+           worker_host: nil,
+           workspace_path: "/workspaces/#{identifier}",
+           session_id: "thread-#{index}",
+           last_codex_message: nil,
+           last_codex_timestamp: DateTime.utc_now(),
+           last_codex_event: :notification,
+           codex_input_tokens: index,
+           codex_cached_input_tokens: index,
+           codex_output_tokens: index,
+           codex_total_tokens: index * 3,
+           turn_count: index,
+           started_at: DateTime.utc_now()
+         }}
+      end)
+
+    :sys.replace_state(pid, fn current_state ->
+      %{current_state | running: entries, claimed: MapSet.new(Map.keys(entries))}
+    end)
+
+    Enum.each(1..51, fn index ->
+      issue_id = "issue-completed-#{index}"
+      entry = Map.fetch!(entries, issue_id)
+      reason = if rem(entry.turn_count, 2) == 0, do: :normal, else: {:shutdown, :test}
+      send(pid, {:DOWN, entry.ref, :process, self(), reason})
+    end)
+
+    snapshot = GenServer.call(pid, :snapshot)
+
+    assert length(snapshot.completed_sessions) == 50
+    assert hd(snapshot.completed_sessions).identifier == "MT-051"
+    assert List.last(snapshot.completed_sessions).identifier == "MT-002"
+    assert Enum.any?(snapshot.completed_sessions, &(&1.status == "completed"))
+    assert Enum.any?(snapshot.completed_sessions, &(&1.status == "failed"))
   end
 
   test "orchestrator snapshot tracks turn completed usage when present" do
