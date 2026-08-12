@@ -21,7 +21,8 @@ defmodule SymphonyElixirWeb.Presenter do
           running: Enum.map(snapshot.running, &running_entry_payload/1),
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
           blocked: Enum.map(Map.get(snapshot, :blocked, []), &blocked_entry_payload/1),
-          codex_totals: snapshot.codex_totals,
+          completed_sessions: Enum.map(Map.get(snapshot, :completed_sessions, []), &completed_session_payload/1),
+          codex_totals: codex_totals_payload(snapshot.codex_totals),
           rate_limits: snapshot.rate_limits
         }
 
@@ -114,9 +115,36 @@ defmodule SymphonyElixirWeb.Presenter do
       started_at: iso8601(entry.started_at),
       last_event_at: iso8601(entry.last_codex_timestamp),
       tokens: %{
-        input_tokens: entry.codex_input_tokens,
-        output_tokens: entry.codex_output_tokens,
-        total_tokens: entry.codex_total_tokens
+        input_tokens: Map.get(entry, :codex_input_tokens, 0),
+        cached_input_tokens: Map.get(entry, :codex_cached_input_tokens, 0),
+        output_tokens: Map.get(entry, :codex_output_tokens, 0),
+        total_tokens: Map.get(entry, :codex_total_tokens, 0)
+      }
+    }
+  end
+
+  defp completed_session_payload(entry) do
+    %{
+      issue_id: entry.issue_id,
+      issue_identifier: entry.identifier,
+      issue_url: Map.get(entry, :issue_url),
+      status: entry.status,
+      error: Map.get(entry, :error),
+      worker_host: Map.get(entry, :worker_host),
+      workspace_path: Map.get(entry, :workspace_path),
+      session_id: Map.get(entry, :session_id),
+      turn_count: Map.get(entry, :turn_count, 0),
+      started_at: iso8601(Map.get(entry, :started_at)),
+      completed_at: iso8601(Map.get(entry, :completed_at)),
+      runtime_seconds: Map.get(entry, :runtime_seconds, 0),
+      last_event: Map.get(entry, :last_codex_event),
+      last_message: summarize_message(Map.get(entry, :last_codex_message)),
+      last_event_at: iso8601(Map.get(entry, :last_codex_timestamp)),
+      tokens: %{
+        input_tokens: Map.get(entry, :codex_input_tokens, 0),
+        cached_input_tokens: Map.get(entry, :codex_cached_input_tokens, 0),
+        output_tokens: Map.get(entry, :codex_output_tokens, 0),
+        total_tokens: Map.get(entry, :codex_total_tokens, 0)
       }
     }
   end
@@ -163,11 +191,20 @@ defmodule SymphonyElixirWeb.Presenter do
       last_message: summarize_message(running.last_codex_message),
       last_event_at: iso8601(running.last_codex_timestamp),
       tokens: %{
-        input_tokens: running.codex_input_tokens,
-        output_tokens: running.codex_output_tokens,
-        total_tokens: running.codex_total_tokens
+        input_tokens: Map.get(running, :codex_input_tokens, 0),
+        cached_input_tokens: Map.get(running, :codex_cached_input_tokens, 0),
+        output_tokens: Map.get(running, :codex_output_tokens, 0),
+        total_tokens: Map.get(running, :codex_total_tokens, 0)
       }
     }
+  end
+
+  defp codex_totals_payload(totals) when is_map(totals) do
+    Map.put_new(totals, :cached_input_tokens, 0)
+  end
+
+  defp codex_totals_payload(_totals) do
+    %{input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
   end
 
   defp retry_issue_payload(retry) do

@@ -97,12 +97,23 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <p class="metric-detail">Issues paused for operator input or approval.</p>
           </article>
 
-          <article class="metric-card">
-            <p class="metric-label">Total tokens</p>
-            <p class="metric-value numeric"><%= format_int(@payload.codex_totals.total_tokens) %></p>
-            <p class="metric-detail numeric">
-              In <%= format_int(@payload.codex_totals.input_tokens) %> / Out <%= format_int(@payload.codex_totals.output_tokens) %>
-            </p>
+          <article class="metric-card metric-card-tokens">
+            <p class="metric-label">Tokens</p>
+            <div class="metric-token-grid numeric">
+              <div>
+                <span class="metric-token-label">Raw in</span>
+                <span class="metric-token-value"><%= format_int(@payload.codex_totals.input_tokens) %></span>
+              </div>
+              <div>
+                <span class="metric-token-label">Cached in</span>
+                <span class="metric-token-value"><%= format_int(@payload.codex_totals.cached_input_tokens) %></span>
+              </div>
+              <div>
+                <span class="metric-token-label">Out</span>
+                <span class="metric-token-value"><%= format_int(@payload.codex_totals.output_tokens) %></span>
+              </div>
+            </div>
+            <p class="metric-detail numeric">Total <%= format_int(@payload.codex_totals.total_tokens) %></p>
           </article>
 
           <article class="metric-card">
@@ -201,8 +212,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
                     </td>
                     <td>
                       <div class="token-stack numeric">
-                        <span>Total: <%= format_int(entry.tokens.total_tokens) %></span>
-                        <span class="muted">In <%= format_int(entry.tokens.input_tokens) %> / Out <%= format_int(entry.tokens.output_tokens) %></span>
+                        <span>Raw in: <%= format_int(entry.tokens.input_tokens) %></span>
+                        <span>Cached in: <%= format_int(entry.tokens.cached_input_tokens) %></span>
+                        <span class="muted">Out: <%= format_int(entry.tokens.output_tokens) %></span>
                       </div>
                     </td>
                   </tr>
@@ -324,6 +336,82 @@ defmodule SymphonyElixirWeb.DashboardLive do
             </div>
           <% end %>
         </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Completed Sessions</h2>
+              <p class="section-copy">The 50 most recent sessions that ended in this runtime, including failures and interruptions.</p>
+            </div>
+          </div>
+
+          <%= if @payload.completed_sessions == [] do %>
+            <p class="empty-state">No completed sessions.</p>
+          <% else %>
+            <div class="table-wrap">
+              <table class="data-table data-table-completed">
+                <colgroup>
+                  <col style="width: 12rem;" />
+                  <col style="width: 8rem;" />
+                  <col style="width: 8.5rem;" />
+                  <col style="width: 10rem;" />
+                  <col style="width: 8.5rem;" />
+                  <col />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Issue</th>
+                    <th>Status</th>
+                    <th>Session</th>
+                    <th>Completed</th>
+                    <th>Runtime / turns</th>
+                    <th>Tokens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={entry <- @payload.completed_sessions}>
+                    <td>
+                      <div class="issue-stack">
+                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                        <span class="muted"><%= entry.last_message || "n/a" %></span>
+                      </div>
+                    </td>
+                    <td>
+                      <span class={state_badge_class(entry.status)}><%= entry.status %></span>
+                      <%= if entry.error do %>
+                        <span class="muted event-meta"><%= entry.error %></span>
+                      <% end %>
+                    </td>
+                    <td>
+                      <%= if entry.session_id do %>
+                        <button
+                          type="button"
+                          class="subtle-button"
+                          data-label="Copy ID"
+                          data-copy={entry.session_id}
+                          onclick="navigator.clipboard.writeText(this.dataset.copy); this.textContent = 'Copied'; clearTimeout(this._copyTimer); this._copyTimer = setTimeout(() => { this.textContent = this.dataset.label }, 1200);"
+                        >
+                          Copy ID
+                        </button>
+                      <% else %>
+                        <span class="muted">n/a</span>
+                      <% end %>
+                    </td>
+                    <td class="mono"><%= entry.completed_at || "n/a" %></td>
+                    <td class="numeric"><%= format_runtime_seconds(entry.runtime_seconds) %> / <%= entry.turn_count %></td>
+                    <td>
+                      <div class="token-stack numeric">
+                        <span>Raw in: <%= format_int(entry.tokens.input_tokens) %></span>
+                        <span>Cached in: <%= format_int(entry.tokens.cached_input_tokens) %></span>
+                        <span class="muted">Out: <%= format_int(entry.tokens.output_tokens) %></span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </section>
       <% end %>
     </section>
     """
@@ -433,6 +521,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
       String.contains?(normalized, ["progress", "running", "active"]) -> "#{base} state-badge-active"
       String.contains?(normalized, ["blocked", "error", "failed"]) -> "#{base} state-badge-danger"
       String.contains?(normalized, ["todo", "queued", "pending", "retry"]) -> "#{base} state-badge-warning"
+      String.contains?(normalized, ["completed", "success"]) -> "#{base} state-badge-completed"
       true -> base
     end
   end
