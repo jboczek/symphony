@@ -1,7 +1,7 @@
 ---
 title: Operations dashboard improvements
 summary: Add a dark operations dashboard, cached-input token accounting, and a bounded completed-session history.
-status: in_progress
+status: done
 ---
 
 # Operations dashboard improvements
@@ -28,18 +28,18 @@ output, and add a bottom-of-page history of the 50 most recently ended sessions.
 
 ## Acceptance criteria
 
-- [ ] The operations dashboard uses a dark color scheme without light card, table, control, code,
+- [x] The operations dashboard uses a dark color scheme without light card, table, control, code,
   warning, or error surfaces.
-- [ ] Aggregate and per-session token payloads expose `input_tokens`, `cached_input_tokens`,
+- [x] Aggregate and per-session token payloads expose `input_tokens`, `cached_input_tokens`,
   `output_tokens`, and `total_tokens`, with cached values derived from cumulative Codex usage
   snapshots without double-counting.
-- [ ] The dashboard labels the three token components `Raw in`, `Cached in`, and `Out` for both
+- [x] The dashboard labels the three token components `Raw in`, `Cached in`, and `Out` for both
   aggregate usage and session rows.
-- [ ] The state/API payload exposes at most 50 ended sessions in newest-first order, including
+- [x] The state/API payload exposes at most 50 ended sessions in newest-first order, including
   sessions ending normally or abnormally, and retains them only for the current process lifetime.
-- [ ] A `Completed Sessions` section appears after the existing sections, renders the ended-session
+- [x] A `Completed Sessions` section appears after the existing sections, renders the ended-session
   details, and has an explicit empty state.
-- [ ] Existing focused dashboard, API, orchestrator, and token-accounting tests remain green.
+- [x] Existing focused dashboard, API, orchestrator, and token-accounting tests remain green.
 
 ## Implementation notes
 
@@ -53,10 +53,16 @@ output, and add a bottom-of-page history of the 50 most recently ended sessions.
 
 ## Tasks
 
-- [ ] Add failing tests for token deltas, completed-session retention/projection, and dashboard
+- [x] Add failing tests for token deltas, completed-session retention/projection, and dashboard
   rendering.
-- [ ] Implement bounded session history and cached-token accounting.
-- [ ] Update presenter, LiveView markup, and dark CSS.
-- [ ] Run focused tests, formatting/spec checks, and the repository quality gate.
-- [ ] Audit acceptance criteria, mark this spec `done`, move it to `docs/specs/done/`, and make the
+- [x] Implement bounded session history and cached-token accounting.
+- [x] Update presenter, LiveView markup, and dark CSS.
+- [x] Run focused tests, formatting/spec checks, and the repository quality gate.
+- [x] Audit acceptance criteria, mark this spec `done`, move it to `docs/specs/done/`, and make the
   lifecycle commit.
+
+## Verification
+
+- Focused tests: `mise exec -- mix test test/symphony_elixir/orchestrator_status_test.exs test/symphony_elixir/extensions_test.exs` — 57 passed.
+- Repository gate: `mise exec -- make all` — 318 passed, 0 failures, 6 skipped; format, specs.check, Credo, coverage, and Dialyzer passed.
+- Implementation commits: `d76dc4f` and `684fde2`.
