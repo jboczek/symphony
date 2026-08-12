@@ -56,6 +56,22 @@ defmodule SymphonyElixir.ContextManagerTest do
     assert observed.context_usage_percent == 0.99
   end
 
+  test "ignores unrelated and incomplete usage payloads and no-op resume transitions" do
+    context = ContextManager.new(%{enabled: true, checkpoint_threshold: 0.70})
+
+    assert ContextManager.observe(context, %{payload: %{"method" => "item/started"}}) == context
+
+    assert ContextManager.observe(context, %{
+             payload: %{
+               "method" => "thread/tokenUsage/updated",
+               "params" => %{"tokenUsage" => nil}
+             }
+           }) == context
+
+    assert ContextManager.resume_completed(context) == context
+    refute ContextManager.checkpoint_pending?(context)
+  end
+
   test "configuration defaults to enabled at seventy percent and validates bounds" do
     assert {:ok, defaults} = Schema.parse(%{})
     assert defaults.context_management.enabled
