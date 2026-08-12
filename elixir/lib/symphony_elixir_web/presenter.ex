@@ -121,6 +121,7 @@ defmodule SymphonyElixirWeb.Presenter do
         total_tokens: Map.get(entry, :codex_total_tokens, 0)
       }
     }
+    |> put_runtime_details(entry)
   end
 
   defp completed_session_payload(entry) do
@@ -197,6 +198,32 @@ defmodule SymphonyElixirWeb.Presenter do
         total_tokens: Map.get(running, :codex_total_tokens, 0)
       }
     }
+    |> put_runtime_details(running)
+  end
+
+  defp put_runtime_details(payload, entry) do
+    details = %{
+      title: Map.get(entry, :title),
+      repository: Map.get(entry, :repository),
+      workspace_path: Map.get(entry, :workspace_path),
+      branch: Map.get(entry, :branch),
+      thread_id: Map.get(entry, :thread_id),
+      model: Map.get(entry, :model),
+      reasoning_effort: Map.get(entry, :reasoning_effort),
+      current_context_tokens: Map.get(entry, :current_context_tokens),
+      model_context_window: Map.get(entry, :model_context_window),
+      context_usage_percent: Map.get(entry, :context_usage_percent),
+      checkpoint_pending: Map.get(entry, :checkpoint_pending),
+      checkpoint_state: Map.get(entry, :checkpoint_state),
+      last_checkpoint_at: iso8601(Map.get(entry, :last_checkpoint_at)),
+      compaction_state: Map.get(entry, :compaction_state)
+    }
+
+    if Enum.any?(details, fn {_key, value} -> !is_nil(value) end) do
+      Map.put(payload, :runtime, details)
+    else
+      payload
+    end
   end
 
   defp codex_totals_payload(totals) when is_map(totals) do

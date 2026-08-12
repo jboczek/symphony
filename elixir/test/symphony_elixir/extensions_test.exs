@@ -270,13 +270,29 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "issue_url" => "https://example.org/issues/MT-HTTP",
                  "state" => "In Progress",
                  "worker_host" => nil,
-                 "workspace_path" => nil,
+                 "workspace_path" => "/workspaces/MT-HTTP",
                  "session_id" => "thread-http",
                  "turn_count" => 7,
                  "last_event" => "notification",
                  "last_message" => "rendered",
                  "started_at" => state_payload["running"] |> List.first() |> Map.fetch!("started_at"),
                  "last_event_at" => nil,
+                 "runtime" => %{
+                   "title" => "HTTP task",
+                   "repository" => "repo-one",
+                   "workspace_path" => "/workspaces/MT-HTTP",
+                   "branch" => "symphony/todoist-task-http",
+                   "thread_id" => "thread-http",
+                   "model" => "gpt-5.6-sol",
+                   "reasoning_effort" => "high",
+                   "current_context_tokens" => 70,
+                   "model_context_window" => 100,
+                   "context_usage_percent" => 0.7,
+                   "checkpoint_pending" => true,
+                   "checkpoint_state" => "pending",
+                   "last_checkpoint_at" => state_payload["running"] |> List.first() |> get_in(["runtime", "last_checkpoint_at"]),
+                   "compaction_state" => "idle"
+                 },
                  "tokens" => %{
                    "input_tokens" => 4,
                    "cached_input_tokens" => 2,
@@ -356,13 +372,13 @@ defmodule SymphonyElixir.ExtensionsTest do
              "issue_id" => "issue-http",
              "status" => "running",
              "workspace" => %{
-               "path" => Path.join(Config.settings!().workspace.root, "MT-HTTP"),
+               "path" => "/workspaces/MT-HTTP",
                "host" => nil
              },
              "attempts" => %{"restart_count" => 0, "current_retry_attempt" => 0},
              "running" => %{
                "worker_host" => nil,
-               "workspace_path" => nil,
+               "workspace_path" => "/workspaces/MT-HTTP",
                "session_id" => "thread-http",
                "turn_count" => 7,
                "state" => "In Progress",
@@ -370,6 +386,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                "last_event" => "notification",
                "last_message" => "rendered",
                "last_event_at" => nil,
+               "runtime" => state_payload["running"] |> List.first() |> Map.fetch!("runtime"),
                "tokens" => %{
                  "input_tokens" => 4,
                  "cached_input_tokens" => 2,
@@ -557,6 +574,12 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Out"
     assert html =~ "Completed Sessions"
     assert html =~ "MT-DONE"
+    assert html =~ "HTTP task"
+    assert html =~ "repo-one"
+    assert html =~ "symphony/todoist-task-http"
+    assert html =~ "gpt-5.6-sol"
+    assert html =~ "checkpoint pending"
+    assert html =~ "Context: 70.0%"
     refute html =~ "data-runtime-clock="
     refute html =~ "setInterval(refreshRuntimeClocks"
     refute html =~ "Refresh now"
@@ -571,6 +594,20 @@ defmodule SymphonyElixir.ExtensionsTest do
           identifier: "MT-HTTP",
           issue_url: "javascript:alert('nope')",
           state: "In Progress",
+          title: "HTTP task",
+          repository: "repo-one",
+          workspace_path: "/workspaces/MT-HTTP",
+          branch: "symphony/todoist-task-http",
+          thread_id: "thread-http",
+          model: "gpt-5.6-sol",
+          reasoning_effort: "high",
+          current_context_tokens: 70,
+          model_context_window: 100,
+          context_usage_percent: 0.7,
+          checkpoint_pending: true,
+          checkpoint_state: "pending",
+          last_checkpoint_at: DateTime.utc_now(),
+          compaction_state: "idle",
           session_id: "thread-http",
           turn_count: 8,
           last_codex_event: :notification,
@@ -720,6 +757,20 @@ defmodule SymphonyElixir.ExtensionsTest do
           identifier: "MT-HTTP",
           issue_url: "https://example.org/issues/MT-HTTP",
           state: "In Progress",
+          title: "HTTP task",
+          repository: "repo-one",
+          workspace_path: "/workspaces/MT-HTTP",
+          branch: "symphony/todoist-task-http",
+          thread_id: "thread-http",
+          model: "gpt-5.6-sol",
+          reasoning_effort: "high",
+          current_context_tokens: 70,
+          model_context_window: 100,
+          context_usage_percent: 0.7,
+          checkpoint_pending: true,
+          checkpoint_state: "pending",
+          last_checkpoint_at: DateTime.utc_now(),
+          compaction_state: "idle",
           session_id: "thread-http",
           turn_count: 7,
           codex_app_server_pid: nil,
