@@ -28,6 +28,8 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
 
     assert workflow.prompt =~ "## Codex Workpad"
     assert workflow.prompt =~ "Todo -> InProgress"
+    assert workflow.prompt =~ "`Blocked`: missing external input"
+    assert workflow.prompt =~ "Move the task to `Blocked`"
     assert workflow.prompt =~ "HumanReview"
     assert workflow.prompt =~ "Rework"
     refute workflow.prompt =~ "td task complete"

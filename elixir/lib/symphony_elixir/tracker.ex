@@ -22,6 +22,7 @@ defmodule SymphonyElixir.Tracker do
 
   @callback fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   @callback fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  @callback block_issue(Issue.t(), String.t()) :: :ok | {:error, term()}
   @callback agent_tool_specs() :: [map()]
   @callback execute_agent_tool(String.t(), term(), keyword()) :: map()
   @callback secret_environment_names(map()) :: [String.t()]
@@ -29,6 +30,7 @@ defmodule SymphonyElixir.Tracker do
 
   @optional_callbacks agent_tool_specs: 0,
                       execute_agent_tool: 3,
+                      block_issue: 2,
                       validate_config: 1
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
@@ -39,6 +41,17 @@ defmodule SymphonyElixir.Tracker do
   @spec fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issues_by_ids(issue_ids) do
     adapter().fetch_issues_by_ids(issue_ids)
+  end
+
+  @spec block_issue(Issue.t(), String.t()) :: :ok | {:error, term()}
+  def block_issue(%Issue{} = issue, reason) when is_binary(reason) do
+    adapter = adapter()
+
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :block_issue, 2) do
+      adapter.block_issue(issue, reason)
+    else
+      :ok
+    end
   end
 
   @doc """

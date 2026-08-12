@@ -20,6 +20,18 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
 
     @spec secret_environment_names(map()) :: [String.t()]
     def secret_environment_names(_settings), do: []
+
+    @spec create_comment(map(), String.t(), String.t()) :: {:ok, map()}
+    def create_comment(_settings, task_id, content) do
+      send(Application.fetch_env!(:symphony_elixir, :todoist_test_pid), {:todoist_create_comment, task_id, content})
+      {:ok, %{"id" => "comment-1", "content" => content}}
+    end
+
+    @spec move_task(map(), String.t(), String.t()) :: {:ok, map()}
+    def move_task(_settings, task_id, section) do
+      send(Application.fetch_env!(:symphony_elixir, :todoist_test_pid), {:todoist_move_task, task_id, section})
+      {:ok, %{"id" => task_id, "section" => section}}
+    end
   end
 
   setup do
@@ -109,6 +121,43 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
     assert sparse_issue.updated_at == nil
 
     assert Adapter.normalize_issue_for_test(Map.put(task("53"), "description", nil), scope()).description == nil
+  end
+
+  test "records a blocker comment and moves the task to Blocked" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "todoist")
+    issue = Adapter.normalize_issue_for_test(task("blocked-1"), scope())
+
+    assert :ok = Adapter.block_issue(issue, "Repository access is missing. Provide access, then retry.")
+
+    assert_received {:todoist_create_comment, "blocked-1", comment}
+    assert comment =~ "[SYMPHONY_BLOCKED_V1]"
+    assert comment =~ "Repository access is missing"
+    assert_received {:todoist_move_task, "blocked-1", "Blocked"}
+  end
+
+  test "orchestrator blocks malformed task configuration before starting a worker" do
+    malformed_task =
+      task("malformed-config")
+      |> Map.put("description", "---\nsymphony: [\n---\nDo work")
+
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, [malformed_task])
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "todoist")
+
+    orchestrator_name = Module.concat(__MODULE__, :MalformedConfigOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :normal)
+    end)
+
+    assert_receive {:todoist_create_comment, "malformed-config", comment}, 1_000
+    assert comment =~ "malformed YAML"
+    assert comment =~ "Action required"
+    assert_receive {:todoist_move_task, "malformed-config", "Blocked"}, 1_000
+
+    state = :sys.get_state(pid)
+    assert state.running == %{}
+    assert Map.has_key?(state.blocked, "malformed-config")
   end
 
   test "normalizes Symphony front matter into typed execution settings" do
@@ -205,7 +254,7 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
 
   @spec scope() :: map()
   def scope do
-    section_names = ["Backlog", "Todo", "InProgress", "HumanReview", "Rework", "Merging", "Done"]
+    section_names = ["Backlog", "Todo", "InProgress", "Blocked", "HumanReview", "Rework", "Merging", "Done"]
 
     sections_by_name =
       Map.new(section_names, fn name ->

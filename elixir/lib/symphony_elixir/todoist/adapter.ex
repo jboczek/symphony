@@ -12,6 +12,8 @@ defmodule SymphonyElixir.Todoist.Adapter do
   alias SymphonyElixir.Todoist.AgentTool
   alias SymphonyElixir.Tracker.Issue
 
+  @blocked_comment_marker "[SYMPHONY_BLOCKED_V1]"
+
   @impl true
   def validate_config(tracker_settings) do
     with :ok <- validate_states(tracker_settings.active_states, :missing_todoist_active_states),
@@ -69,6 +71,17 @@ defmodule SymphonyElixir.Todoist.Adapter do
   @impl true
   def secret_environment_names(tracker_settings) do
     cli_module().secret_environment_names(tracker_settings)
+  end
+
+  @impl true
+  def block_issue(%Issue{id: task_id}, reason) when is_binary(task_id) and is_binary(reason) do
+    tracker_settings = Config.settings!().tracker
+    comment = "#{@blocked_comment_marker}\n#{reason}"
+
+    with {:ok, _comment} <- cli_module().create_comment(tracker_settings, task_id, comment),
+         {:ok, _task} <- cli_module().move_task(tracker_settings, task_id, "Blocked") do
+      :ok
+    end
   end
 
   @doc false

@@ -64,6 +64,9 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
            ]
 
     refute Enum.any?(operations, &(&1 in ["task_delete", "task_complete", "project_delete", "section_archive"]))
+
+    [tool_spec] = AgentTool.tool_specs()
+    assert "Blocked" in get_in(tool_spec, ["inputSchema", "properties", "section", "enum"])
   end
 
   test "adapter advertises and executes the structured Todoist tool" do

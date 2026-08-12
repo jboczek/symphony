@@ -44,7 +44,16 @@ defmodule SymphonyElixir.Todoist.AgentTool do
       "comment_id" => %{"type" => "string", "description" => "Canonical Todoist comment ID."},
       "section" => %{
         "type" => "string",
-        "enum" => ["Backlog", "Todo", "InProgress", "HumanReview", "Rework", "Merging", "Done"]
+        "enum" => [
+          "Backlog",
+          "Todo",
+          "InProgress",
+          "Blocked",
+          "HumanReview",
+          "Rework",
+          "Merging",
+          "Done"
+        ]
       },
       "content" => %{"type" => "string"},
       "description" => %{"type" => "string"},

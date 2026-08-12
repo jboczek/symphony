@@ -925,6 +925,32 @@ defmodule SymphonyElixir.CoreTest do
     refute MapSet.member?(updated_state.claimed, issue_id)
   end
 
+  test "reconcile releases a blocked issue after Todoist reflects the Blocked state" do
+    issue_id = "blocked-reactivated"
+
+    state = %Orchestrator.State{
+      blocked: %{issue_id => %{identifier: "MT-REACTIVATED", error: "input required"}},
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-REACTIVATED",
+      title: "Waiting for input",
+      state: "Blocked",
+      dispatchable: true
+    }
+
+    updated_state = Orchestrator.reconcile_blocked_issue_states_for_test([issue], state)
+
+    refute Map.has_key?(updated_state.blocked, issue_id)
+    refute MapSet.member?(updated_state.claimed, issue_id)
+
+    active_issue = %{issue | state: "In Progress"}
+    assert Orchestrator.should_dispatch_issue_for_test(active_issue, updated_state)
+  end
+
   test "retry releases its claim when a required label is removed" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
 
