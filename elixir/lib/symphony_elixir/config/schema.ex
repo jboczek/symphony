@@ -121,6 +121,27 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  defmodule Repositories do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:root, :string, default: "/Users/your-username/git")
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:root], empty_values: [])
+      |> validate_required([:root])
+      |> validate_change(:root, fn :root, root ->
+        if String.trim(root) == "", do: [root: "can't be blank"], else: []
+      end)
+    end
+  end
+
   defmodule Worker do
     @moduledoc false
     use Ecto.Schema
@@ -297,6 +318,7 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:tracker, Tracker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:polling, Polling, on_replace: :update, defaults_to_struct: true)
     embeds_one(:workspace, Workspace, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:repositories, Repositories, on_replace: :update, defaults_to_struct: true)
     embeds_one(:worker, Worker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:agent, Agent, on_replace: :update, defaults_to_struct: true)
     embeds_one(:codex, Codex, on_replace: :update, defaults_to_struct: true)
@@ -391,6 +413,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:tracker, with: &Tracker.changeset/2)
     |> cast_embed(:polling, with: &Polling.changeset/2)
     |> cast_embed(:workspace, with: &Workspace.changeset/2)
+    |> cast_embed(:repositories, with: &Repositories.changeset/2)
     |> cast_embed(:worker, with: &Worker.changeset/2)
     |> cast_embed(:agent, with: &Agent.changeset/2)
     |> cast_embed(:codex, with: &Codex.changeset/2)
@@ -458,13 +481,18 @@ defmodule SymphonyElixir.Config.Schema do
       | root: resolve_path_value(settings.workspace.root, Path.join(System.tmp_dir!(), "symphony_workspaces"))
     }
 
+    repositories = %{
+      settings.repositories
+      | root: resolve_path_value(settings.repositories.root, "/Users/your-username/git")
+    }
+
     codex = %{
       settings.codex
       | approval_policy: normalize_keys(settings.codex.approval_policy),
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    %{settings | tracker: tracker, workspace: workspace, repositories: repositories, codex: codex}
   end
 
   defp normalize_keys(value) when is_map(value) do

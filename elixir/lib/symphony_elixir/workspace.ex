@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Workspace do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, PathSafety, SSH}
+  alias SymphonyElixir.{Config, GitWorktree, PathSafety, RepositoryResolver, SSH, TaskExecutionSettings}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
 
@@ -16,12 +16,17 @@ defmodule SymphonyElixir.Workspace do
     issue_context = issue_context(issue_or_identifier)
 
     try do
-      safe_id = workspace_key(issue_or_identifier)
-
-      with {:ok, workspace} <- workspace_path_for_issue(safe_id, worker_host),
+      with {:ok, workspace} <- workspace_path_for_issue(issue_or_identifier, worker_host),
            :ok <- validate_workspace_path(workspace, worker_host),
-           {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host) do
-        case maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
+           {:ok, workspace, created?, workspace_type} <-
+             ensure_issue_workspace(workspace, issue_or_identifier, worker_host) do
+        case maybe_run_after_create_hook(
+               workspace,
+               issue_context,
+               created?,
+               workspace_type,
+               worker_host
+             ) do
           :ok ->
             {:ok, workspace}
 
@@ -34,6 +39,43 @@ defmodule SymphonyElixir.Workspace do
       error in [ArgumentError, ErlangError, File.Error] ->
         Logger.error("Workspace creation failed #{issue_log_context(issue_context)} worker_host=#{worker_host_for_log(worker_host)} error=#{Exception.message(error)}")
         {:error, error}
+    end
+  end
+
+  defp ensure_issue_workspace(workspace, issue, nil) do
+    case requested_repository(issue) do
+      {:ok, nil} ->
+        with {:ok, workspace, created?} <- ensure_workspace(workspace, nil) do
+          {:ok, workspace, created?, :directory}
+        end
+
+      {:ok, repository_name} ->
+        with {:ok, repository} <-
+               RepositoryResolver.resolve(repository_name, Config.local_repository_root()),
+             task_identity <- workspace_identity(issue),
+             branch <- "symphony/#{task_identity}",
+             {:ok, _metadata, created?} <-
+               GitWorktree.ensure(repository, workspace, task_identity, branch) do
+          {:ok, workspace, created?, :git_worktree}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp ensure_issue_workspace(workspace, issue, worker_host) when is_binary(worker_host) do
+    case requested_repository(issue) do
+      {:ok, nil} ->
+        with {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host) do
+          {:ok, workspace, created?, :directory}
+        end
+
+      {:ok, _repository_name} ->
+        {:error, {:repository_worktrees_require_local_worker, worker_host}}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -95,18 +137,17 @@ defmodule SymphonyElixir.Workspace do
 
   @spec remove(Path.t(), worker_host()) :: {:ok, [String.t()]} | {:error, term(), String.t()}
   def remove(workspace, nil) do
-    case File.exists?(workspace) do
-      true ->
-        case validate_workspace_path(workspace, nil) do
-          :ok ->
-            remove_local_workspace(workspace)
-
-          {:error, reason} ->
-            {:error, reason, ""}
-        end
-
-      false ->
-        File.rm_rf(workspace)
+    if File.exists?(workspace) do
+      case validate_workspace_path(workspace, nil) do
+        :ok -> remove_local_workspace(workspace)
+        {:error, reason} -> {:error, reason, ""}
+      end
+    else
+      case GitWorktree.remove_recorded(workspace) do
+        {:ok, _removed} = result -> result
+        :not_owned -> File.rm_rf(workspace)
+        {:error, _reason, _path} = error -> error
+      end
     end
   end
 
@@ -158,7 +199,21 @@ defmodule SymphonyElixir.Workspace do
 
   defp remove_local_workspace(workspace) do
     maybe_run_before_remove_hook(workspace, nil)
-    File.rm_rf(workspace)
+
+    case GitWorktree.remove_recorded(workspace) do
+      {:ok, _removed} = result ->
+        result
+
+      :not_owned ->
+        if GitWorktree.linked_worktree?(workspace) do
+          {:error, {:unowned_git_worktree, workspace}, ""}
+        else
+          File.rm_rf(workspace)
+        end
+
+      {:error, _reason, _path} = error ->
+        error
+    end
   end
 
   @spec remove_issue_workspaces(term()) :: :ok
@@ -178,10 +233,7 @@ defmodule SymphonyElixir.Workspace do
   def remove_issue_workspaces(%{id: _issue_id, identifier: _identifier} = issue, nil) do
     case Config.settings!().worker.ssh_hosts do
       [] ->
-        case workspace_path_for_issue(workspace_key(issue), nil) do
-          {:ok, workspace} -> remove(workspace, nil)
-          {:error, _reason} -> :ok
-        end
+        remove_local_issue_workspace(issue)
 
       worker_hosts ->
         Enum.each(worker_hosts, &remove_issue_workspaces(issue, &1))
@@ -202,7 +254,7 @@ defmodule SymphonyElixir.Workspace do
   def remove_issue_workspaces(identifier, nil) when is_binary(identifier) do
     case Config.settings!().worker.ssh_hosts do
       [] ->
-        case workspace_path_for_issue(workspace_key(identifier), nil) do
+        case workspace_path_for_issue(identifier, nil) do
           {:ok, workspace} -> remove(workspace, nil)
           {:error, _reason} -> :ok
         end
@@ -215,6 +267,43 @@ defmodule SymphonyElixir.Workspace do
   end
 
   def remove_issue_workspaces(_identifier, _worker_host), do: :ok
+
+  defp remove_local_issue_workspace(issue) do
+    with {:ok, repository_name} when is_binary(repository_name) <- requested_repository(issue),
+         {:ok, repository} <-
+           RepositoryResolver.resolve(repository_name, Config.local_repository_root()) do
+      maybe_run_owned_worktree_remove_hook(workspace_identity(issue))
+
+      case GitWorktree.remove_for_identity(workspace_identity(issue), repository) do
+        {:ok, _removed} -> :ok
+        :not_owned -> remove_discovered_issue_workspace(issue)
+        {:error, reason, path} -> log_workspace_cleanup_failure(issue, reason, path)
+      end
+    else
+      {:ok, nil} -> remove_discovered_issue_workspace(issue)
+      {:error, reason} -> log_workspace_cleanup_failure(issue, reason, "")
+    end
+  end
+
+  defp maybe_run_owned_worktree_remove_hook(task_identity) do
+    case GitWorktree.lookup(task_identity) do
+      {:ok, %{workspace: workspace}} -> maybe_run_before_remove_hook(workspace, nil)
+      _ -> :ok
+    end
+  end
+
+  defp remove_discovered_issue_workspace(issue) do
+    case workspace_path_for_issue(issue, nil) do
+      {:ok, workspace} -> remove(workspace, nil)
+      {:error, _reason} -> :ok
+    end
+  end
+
+  defp log_workspace_cleanup_failure(issue, reason, path) do
+    Logger.warning("Failed to remove issue workspace #{issue_log_context(issue_context(issue))} reason=#{inspect(reason)} path=#{path}")
+
+    :ok
+  end
 
   @spec run_before_run_hook(Path.t(), map() | String.t() | nil, worker_host()) ::
           :ok | {:error, term()}
@@ -246,14 +335,26 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp workspace_path_for_issue(safe_id, nil) when is_binary(safe_id) do
+  defp workspace_path_for_issue(%{id: id, title: title} = issue, nil)
+       when is_binary(id) and is_binary(title) do
+    with {:ok, existing_workspace} <- discover_existing_workspace(issue) do
+      workspace = existing_workspace || Path.join(Config.local_workspace_root(), workspace_key(issue))
+      PathSafety.canonicalize(workspace)
+    end
+  end
+
+  defp workspace_path_for_issue(%{identifier: identifier}, nil) when is_binary(identifier) do
+    workspace_path_for_issue(identifier, nil)
+  end
+
+  defp workspace_path_for_issue(identifier, nil) when is_binary(identifier) do
     Config.local_workspace_root()
-    |> Path.join(safe_id)
+    |> Path.join(workspace_key(identifier))
     |> PathSafety.canonicalize()
   end
 
-  defp workspace_path_for_issue(safe_id, worker_host) when is_binary(safe_id) and is_binary(worker_host) do
-    {:ok, Path.join(Config.settings!().workspace.root, safe_id)}
+  defp workspace_path_for_issue(issue_or_identifier, worker_host) when is_binary(worker_host) do
+    {:ok, Path.join(Config.settings!().workspace.root, workspace_key(issue_or_identifier))}
   end
 
   @doc """
@@ -263,6 +364,12 @@ defmodule SymphonyElixir.Workspace do
   derive the same key as callers holding a full tracker issue.
   """
   @spec workspace_key(map() | String.t() | nil) :: String.t()
+  def workspace_key(%{id: id, identifier: identifier, title: title})
+      when is_binary(id) and is_binary(title) do
+    identity = workspace_identity(%{id: id, identifier: identifier})
+    "#{identity}-#{title_slug(title)}"
+  end
+
   def workspace_key(%{identifier: identifier}), do: workspace_key(identifier)
 
   def workspace_key(identifier) when is_binary(identifier) do
@@ -286,7 +393,102 @@ defmodule SymphonyElixir.Workspace do
     |> binary_part(0, 16)
   end
 
-  defp maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
+  defp discover_existing_workspace(issue) do
+    identity = workspace_identity(issue)
+
+    case GitWorktree.lookup(identity) do
+      {:ok, %{workspace: workspace}} ->
+        {:ok, workspace}
+
+      {:ok, nil} ->
+        discover_workspace_directory(issue, identity)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp discover_workspace_directory(issue, identity) do
+    root = Config.local_workspace_root()
+    legacy_name = workspace_key(issue.identifier)
+
+    case File.ls(root) do
+      {:ok, entries} ->
+        matches =
+          entries
+          |> Enum.filter(fn entry ->
+            entry == legacy_name or entry == identity or String.starts_with?(entry, identity <> "-")
+          end)
+          |> Enum.map(&Path.join(root, &1))
+          |> Enum.filter(&File.dir?/1)
+
+        case matches do
+          [] -> {:ok, nil}
+          [workspace] -> {:ok, workspace}
+          _ -> {:error, {:ambiguous_issue_workspaces, identity, Enum.sort(matches)}}
+        end
+
+      {:error, :enoent} ->
+        {:ok, nil}
+
+      {:error, reason} ->
+        {:error, {:workspace_root_unreadable, root, reason}}
+    end
+  end
+
+  defp workspace_identity(%{id: id, identifier: identifier}) when is_binary(id) do
+    source = source_component(identifier)
+    stable_id = safe_component(id, "task")
+    "#{source}-#{stable_id}"
+  end
+
+  defp workspace_identity(%{identifier: identifier}) when is_binary(identifier),
+    do: safe_component(identifier, "issue")
+
+  defp workspace_identity(identifier) when is_binary(identifier),
+    do: safe_component(identifier, "issue")
+
+  defp workspace_identity(_issue), do: "task-issue"
+
+  defp source_component(identifier) when is_binary(identifier) do
+    identifier
+    |> String.split("-", parts: 2)
+    |> List.first()
+    |> safe_component("task")
+  end
+
+  defp source_component(_identifier), do: "task"
+
+  defp safe_component(value, fallback) when is_binary(value) do
+    value
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9._-]+/u, "-")
+    |> String.replace(~r/-+/, "-")
+    |> String.trim("-._")
+    |> case do
+      "" -> fallback
+      component -> component
+    end
+  end
+
+  defp title_slug(title) when is_binary(title) do
+    title
+    |> String.normalize(:nfc)
+    |> String.downcase()
+    |> String.replace(~r/[^\p{L}\p{N}]+/u, "-")
+    |> String.replace(~r/-+/, "-")
+    |> String.trim("-")
+    |> String.graphemes()
+    |> Enum.take(64)
+    |> Enum.join()
+    |> String.trim("-")
+    |> case do
+      "" -> "task"
+      slug -> slug
+    end
+  end
+
+  defp maybe_run_after_create_hook(workspace, issue_context, created?, :directory, worker_host) do
     hooks = Config.settings!().hooks
 
     case created? do
@@ -303,6 +505,9 @@ defmodule SymphonyElixir.Workspace do
         :ok
     end
   end
+
+  defp maybe_run_after_create_hook(_workspace, _issue_context, _created?, :git_worktree, _worker_host),
+    do: :ok
 
   defp cleanup_failed_new_workspace(_workspace, false, _worker_host), do: :ok
 
@@ -592,4 +797,10 @@ defmodule SymphonyElixir.Workspace do
   defp issue_log_context(%{issue_id: issue_id, issue_identifier: issue_identifier}) do
     "issue_id=#{issue_id || "n/a"} issue_identifier=#{issue_identifier || "issue"}"
   end
+
+  defp requested_repository(%{execution_settings: %TaskExecutionSettings{repo: repository}}),
+    do: {:ok, repository}
+
+  defp requested_repository(%{execution_settings: {:error, reason}}), do: {:error, reason}
+  defp requested_repository(_issue), do: {:ok, nil}
 end
