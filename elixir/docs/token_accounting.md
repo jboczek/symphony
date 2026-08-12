@@ -302,3 +302,15 @@ If Symphony documents token reporting externally, the contract should be:
 - Key totals by `thread_id`
 - Do not classify generic `usage` by field name alone
 - Do not double-count turn-completed usage after live updates
+
+## Dashboard Projection
+
+The observability API and dashboard expose the cumulative Codex breakdown as:
+
+- `input_tokens` — raw input tokens
+- `cached_input_tokens` — cached input tokens
+- `output_tokens` — output tokens
+- `total_tokens` — the upstream cumulative total
+
+Completed-session history is an in-memory, newest-first list of at most 50 ended worker sessions.
+It includes normal, failed, stalled, and reconciled/terminated sessions and is cleared on restart.

@@ -328,6 +328,9 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
+- Dark-mode metrics split Codex usage into raw input, cached input, and output tokens
+- A bounded `Completed Sessions` section shows the latest 50 ended sessions, including failures;
+  this history is kept in memory for the current process only
 
 ## Project Layout
 

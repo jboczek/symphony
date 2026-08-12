@@ -277,7 +277,12 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "last_message" => "rendered",
                  "started_at" => state_payload["running"] |> List.first() |> Map.fetch!("started_at"),
                  "last_event_at" => nil,
-                 "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
+                 "tokens" => %{
+                   "input_tokens" => 4,
+                   "cached_input_tokens" => 2,
+                   "output_tokens" => 8,
+                   "total_tokens" => 12
+                 }
                }
              ],
              "retrying" => [
@@ -310,10 +315,36 @@ defmodule SymphonyElixir.ExtensionsTest do
              ],
              "codex_totals" => %{
                "input_tokens" => 4,
+               "cached_input_tokens" => 2,
                "output_tokens" => 8,
                "total_tokens" => 12,
                "seconds_running" => 42.5
              },
+             "completed_sessions" => [
+               %{
+                 "issue_id" => "issue-completed",
+                 "issue_identifier" => "MT-DONE",
+                 "issue_url" => "https://example.org/issues/MT-DONE",
+                 "status" => "failed",
+                 "error" => "agent exited: :killed",
+                 "worker_host" => "dm-dev3",
+                 "workspace_path" => "/workspaces/MT-DONE",
+                 "session_id" => "thread-done",
+                 "turn_count" => 3,
+                 "started_at" => state_payload["completed_sessions"] |> List.first() |> Map.fetch!("started_at"),
+                 "completed_at" => state_payload["completed_sessions"] |> List.first() |> Map.fetch!("completed_at"),
+                 "runtime_seconds" => 91,
+                 "last_event" => "turn_completed",
+                 "last_message" => "turn completed (failed)",
+                 "last_event_at" => state_payload["completed_sessions"] |> List.first() |> Map.fetch!("last_event_at"),
+                 "tokens" => %{
+                   "input_tokens" => 40,
+                   "cached_input_tokens" => 10,
+                   "output_tokens" => 8,
+                   "total_tokens" => 58
+                 }
+               }
+             ],
              "rate_limits" => %{"primary" => %{"remaining" => 11}}
            }
 
@@ -339,7 +370,12 @@ defmodule SymphonyElixir.ExtensionsTest do
                "last_event" => "notification",
                "last_message" => "rendered",
                "last_event_at" => nil,
-               "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
+               "tokens" => %{
+                 "input_tokens" => 4,
+                 "cached_input_tokens" => 2,
+                 "output_tokens" => 8,
+                 "total_tokens" => 12
+               }
              },
              "retry" => nil,
              "blocked" => nil,
@@ -459,6 +495,8 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     dashboard_css = response(get(build_conn(), "/dashboard.css"), 200)
     assert dashboard_css =~ ":root {"
+    assert dashboard_css =~ "color-scheme: dark"
+    assert dashboard_css =~ "--page: #0f1117"
     assert dashboard_css =~ ".status-badge-live"
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-live"
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-offline"
@@ -514,6 +552,11 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Offline"
     assert html =~ "Copy ID"
     assert html =~ "Codex update"
+    assert html =~ "Raw in"
+    assert html =~ "Cached in"
+    assert html =~ "Out"
+    assert html =~ "Completed Sessions"
+    assert html =~ "MT-DONE"
     refute html =~ "data-runtime-clock="
     refute html =~ "setInterval(refreshRuntimeClocks"
     refute html =~ "Refresh now"
@@ -574,6 +617,23 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, _view, html} = live(build_conn(), "/")
     assert html =~ "Snapshot unavailable"
     assert html =~ "snapshot_unavailable"
+  end
+
+  test "dashboard liveview renders an empty completed sessions state" do
+    orchestrator_name = Module.concat(__MODULE__, :EmptyCompletedSessionsOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: put_in(static_snapshot().completed_sessions, []),
+        refresh: :unavailable
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+    assert html =~ "Completed Sessions"
+    assert html =~ "No completed sessions."
   end
 
   test "http server serves embedded assets, accepts form posts, and rejects invalid hosts" do
@@ -667,6 +727,7 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_timestamp: nil,
           last_codex_event: :notification,
           codex_input_tokens: 4,
+          codex_cached_input_tokens: 2,
           codex_output_tokens: 8,
           codex_total_tokens: 12,
           started_at: DateTime.utc_now()
@@ -702,7 +763,42 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_timestamp: DateTime.utc_now()
         }
       ],
-      codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
+      codex_totals: %{
+        input_tokens: 4,
+        cached_input_tokens: 2,
+        output_tokens: 8,
+        total_tokens: 12,
+        seconds_running: 42.5
+      },
+      completed_sessions: [
+        %{
+          issue_id: "issue-completed",
+          identifier: "MT-DONE",
+          issue_url: "https://example.org/issues/MT-DONE",
+          status: "failed",
+          error: "agent exited: :killed",
+          worker_host: "dm-dev3",
+          workspace_path: "/workspaces/MT-DONE",
+          session_id: "thread-done",
+          turn_count: 3,
+          started_at: DateTime.utc_now() |> DateTime.add(-91, :second),
+          completed_at: DateTime.utc_now(),
+          runtime_seconds: 91,
+          last_codex_event: "turn_completed",
+          last_codex_message: %{
+            event: :notification,
+            message: %{
+              "method" => "turn/completed",
+              "params" => %{"turn" => %{"status" => "failed"}}
+            }
+          },
+          last_codex_timestamp: DateTime.utc_now() |> DateTime.add(-1, :second),
+          codex_input_tokens: 40,
+          codex_cached_input_tokens: 10,
+          codex_output_tokens: 8,
+          codex_total_tokens: 58
+        }
+      ],
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }
   end

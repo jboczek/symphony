@@ -1,21 +1,24 @@
 :root {
-  color-scheme: light;
-  --page: #f7f7f8;
-  --page-soft: #fbfbfc;
-  --page-deep: #ececf1;
-  --card: rgba(255, 255, 255, 0.94);
-  --card-muted: #f3f4f6;
-  --ink: #202123;
-  --muted: #6e6e80;
-  --line: #ececf1;
-  --line-strong: #d9d9e3;
-  --accent: #10a37f;
-  --accent-ink: #0f513f;
-  --accent-soft: #e8faf4;
-  --danger: #b42318;
-  --danger-soft: #fef3f2;
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow-lg: 0 20px 50px rgba(15, 23, 42, 0.08);
+  color-scheme: dark;
+  --page: #0f1117;
+  --page-soft: #151922;
+  --page-deep: #202735;
+  --card: rgba(24, 29, 39, 0.96);
+  --card-muted: #1d2430;
+  --ink: #f5f7fb;
+  --muted: #9aa4b2;
+  --line: #2a3342;
+  --line-strong: #3c485a;
+  --accent: #34d399;
+  --accent-ink: #b8f7dc;
+  --accent-soft: #123b32;
+  --danger: #ff9189;
+  --danger-soft: #3a1d20;
+  --warning: #f5d080;
+  --warning-soft: #352b18;
+  --warning-line: #6a5527;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.34);
 }
 
 * {
@@ -30,8 +33,8 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top, rgba(16, 163, 127, 0.12) 0%, rgba(16, 163, 127, 0) 30%),
-    linear-gradient(180deg, var(--page-soft) 0%, var(--page) 24%, #f3f4f6 100%);
+    radial-gradient(circle at top, rgba(52, 211, 153, 0.12) 0%, rgba(52, 211, 153, 0) 30%),
+    linear-gradient(180deg, var(--page-soft) 0%, var(--page) 24%, var(--page-deep) 100%);
   color: var(--ink);
   font-family: "Sohne", "SF Pro Text", "Helvetica Neue", "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -85,7 +88,7 @@ button.secondary:hover {
 .subtle-button {
   appearance: none;
   border: 1px solid var(--line-strong);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--muted);
   border-radius: 999px;
   padding: 0.34rem 0.72rem;
@@ -104,7 +107,7 @@ button.secondary:hover {
 .subtle-button:hover {
   transform: none;
   box-shadow: none;
-  background: white;
+  background: var(--card-muted);
   border-color: var(--muted);
   color: var(--ink);
 }
@@ -143,7 +146,7 @@ pre,
 .metric-card,
 .error-card {
   background: var(--card);
-  border: 1px solid rgba(217, 217, 227, 0.82);
+  border: 1px solid var(--line);
   box-shadow: var(--shadow-sm);
   backdrop-filter: blur(18px);
 }
@@ -222,7 +225,7 @@ pre,
 }
 
 .status-badge-offline {
-  background: #f5f5f7;
+  background: var(--card-muted);
   border-color: var(--line-strong);
   color: var(--muted);
 }
@@ -267,6 +270,32 @@ pre,
   font-size: 0.88rem;
 }
 
+.metric-token-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-top: 0.55rem;
+}
+
+.metric-token-grid > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.metric-token-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.metric-token-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
 .section-card {
   border-radius: 24px;
   padding: 1.15rem;
@@ -307,6 +336,11 @@ pre,
 .data-table-running {
   table-layout: fixed;
   min-width: 980px;
+}
+
+.data-table-completed {
+  min-width: 980px;
+  table-layout: fixed;
 }
 
 .data-table th {
@@ -371,15 +405,21 @@ pre,
   color: var(--accent-ink);
 }
 
+.state-badge-completed {
+  background: var(--accent-soft);
+  border-color: var(--line-strong);
+  color: var(--accent-ink);
+}
+
 .state-badge-warning {
-  background: #fff7e8;
-  border-color: #f1d8a6;
-  color: #8a5a00;
+  background: var(--warning-soft);
+  border-color: var(--warning-line);
+  color: var(--warning);
 }
 
 .state-badge-danger {
   background: var(--danger-soft);
-  border-color: #f6d3cf;
+  border-color: var(--danger);
   color: var(--danger);
 }
 
@@ -409,9 +449,9 @@ pre,
   margin-top: 1rem;
   padding: 1rem;
   border-radius: 18px;
-  background: #f5f5f7;
+  background: var(--card-muted);
   border: 1px solid var(--line);
-  color: #353740;
+  color: var(--ink);
   font-size: 0.9rem;
 }
 
@@ -423,8 +463,8 @@ pre,
 .error-card {
   border-radius: 24px;
   padding: 1.25rem;
-  background: linear-gradient(180deg, #fff8f7 0%, var(--danger-soft) 100%);
-  border-color: #f6d3cf;
+  background: linear-gradient(180deg, #2b181c 0%, var(--danger-soft) 100%);
+  border-color: var(--danger);
 }
 
 .error-title {
