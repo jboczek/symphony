@@ -23,6 +23,7 @@ defmodule SymphonyElixir.Tracker do
   @callback fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   @callback fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   @callback block_issue(Issue.t(), String.t()) :: :ok | {:error, term()}
+  @callback latest_checkpoint_comment(Issue.t()) :: {:ok, map() | nil} | {:error, term()}
   @callback agent_tool_specs() :: [map()]
   @callback execute_agent_tool(String.t(), term(), keyword()) :: map()
   @callback secret_environment_names(map()) :: [String.t()]
@@ -31,6 +32,7 @@ defmodule SymphonyElixir.Tracker do
   @optional_callbacks agent_tool_specs: 0,
                       execute_agent_tool: 3,
                       block_issue: 2,
+                      latest_checkpoint_comment: 1,
                       validate_config: 1
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
@@ -51,6 +53,17 @@ defmodule SymphonyElixir.Tracker do
       adapter.block_issue(issue, reason)
     else
       :ok
+    end
+  end
+
+  @spec latest_checkpoint_comment(Issue.t()) :: {:ok, map() | nil} | {:error, term()}
+  def latest_checkpoint_comment(%Issue{} = issue) do
+    adapter = adapter()
+
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :latest_checkpoint_comment, 1) do
+      adapter.latest_checkpoint_comment(issue)
+    else
+      {:error, :checkpoint_comments_unsupported}
     end
   end
 

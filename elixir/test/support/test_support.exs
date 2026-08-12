@@ -120,6 +120,8 @@ defmodule SymphonyElixir.TestSupport do
           hook_after_run: nil,
           hook_before_remove: nil,
           hook_timeout_ms: 60_000,
+          context_management_enabled: true,
+          context_checkpoint_threshold: 0.70,
           observability_enabled: true,
           observability_refresh_ms: 1_000,
           observability_render_interval_ms: 16,
@@ -161,6 +163,8 @@ defmodule SymphonyElixir.TestSupport do
     hook_after_run = Keyword.get(config, :hook_after_run)
     hook_before_remove = Keyword.get(config, :hook_before_remove)
     hook_timeout_ms = Keyword.get(config, :hook_timeout_ms)
+    context_management_enabled = Keyword.get(config, :context_management_enabled)
+    context_checkpoint_threshold = Keyword.get(config, :context_checkpoint_threshold)
     observability_enabled = Keyword.get(config, :observability_enabled)
     observability_refresh_ms = Keyword.get(config, :observability_refresh_ms)
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
@@ -203,6 +207,7 @@ defmodule SymphonyElixir.TestSupport do
         "  read_timeout_ms: #{yaml_value(codex_read_timeout_ms)}",
         "  stall_timeout_ms: #{yaml_value(codex_stall_timeout_ms)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
+        context_management_yaml(context_management_enabled, context_checkpoint_threshold),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
         "---",
@@ -218,6 +223,7 @@ defmodule SymphonyElixir.TestSupport do
   end
 
   defp yaml_value(value) when is_integer(value), do: to_string(value)
+  defp yaml_value(value) when is_float(value), do: to_string(value)
   defp yaml_value(true), do: "true"
   defp yaml_value(false), do: "false"
   defp yaml_value(nil), do: "null"
@@ -271,6 +277,15 @@ defmodule SymphonyElixir.TestSupport do
       "  dashboard_enabled: #{yaml_value(enabled)}",
       "  refresh_ms: #{yaml_value(refresh_ms)}",
       "  render_interval_ms: #{yaml_value(render_interval_ms)}"
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp context_management_yaml(enabled, checkpoint_threshold) do
+    [
+      "context_management:",
+      "  enabled: #{yaml_value(enabled)}",
+      "  checkpoint_threshold: #{yaml_value(checkpoint_threshold)}"
     ]
     |> Enum.join("\n")
   end

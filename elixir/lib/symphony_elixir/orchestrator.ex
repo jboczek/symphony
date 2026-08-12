@@ -171,6 +171,13 @@ defmodule SymphonyElixir.Orchestrator do
           |> maybe_put_runtime_value(:thread_id, runtime_info[:thread_id])
           |> maybe_put_runtime_value(:model, runtime_info[:model])
           |> maybe_put_runtime_value(:reasoning_effort, runtime_info[:reasoning_effort])
+          |> maybe_put_runtime_value(:current_context_tokens, runtime_info[:current_context_tokens])
+          |> maybe_put_runtime_value(:model_context_window, runtime_info[:model_context_window])
+          |> maybe_put_runtime_value(:context_usage_percent, runtime_info[:context_usage_percent])
+          |> maybe_put_runtime_value(:checkpoint_pending, runtime_info[:checkpoint_pending])
+          |> maybe_put_runtime_value(:checkpoint_state, runtime_info[:checkpoint_state])
+          |> maybe_put_runtime_value(:last_checkpoint_at, runtime_info[:last_checkpoint_at])
+          |> maybe_put_runtime_value(:compaction_state, runtime_info[:compaction_state])
 
         notify_dashboard()
         {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
@@ -1068,6 +1075,13 @@ defmodule SymphonyElixir.Orchestrator do
             thread_id: nil,
             model: nil,
             reasoning_effort: nil,
+            current_context_tokens: nil,
+            model_context_window: nil,
+            context_usage_percent: nil,
+            checkpoint_pending: false,
+            checkpoint_state: "idle",
+            last_checkpoint_at: nil,
+            compaction_state: "idle",
             session_id: nil,
             last_codex_message: nil,
             last_codex_timestamp: nil,
@@ -1520,6 +1534,7 @@ defmodule SymphonyElixir.Orchestrator do
         %{
           issue_id: issue_id,
           identifier: metadata.identifier,
+          title: metadata.issue.title,
           issue_url: metadata.issue.url,
           state: metadata.issue.state,
           worker_host: Map.get(metadata, :worker_host),
@@ -1529,6 +1544,13 @@ defmodule SymphonyElixir.Orchestrator do
           thread_id: Map.get(metadata, :thread_id),
           model: Map.get(metadata, :model),
           reasoning_effort: Map.get(metadata, :reasoning_effort),
+          current_context_tokens: Map.get(metadata, :current_context_tokens),
+          model_context_window: Map.get(metadata, :model_context_window),
+          context_usage_percent: Map.get(metadata, :context_usage_percent),
+          checkpoint_pending: Map.get(metadata, :checkpoint_pending, false),
+          checkpoint_state: Map.get(metadata, :checkpoint_state, "idle"),
+          last_checkpoint_at: Map.get(metadata, :last_checkpoint_at),
+          compaction_state: Map.get(metadata, :compaction_state, "idle"),
           session_id: metadata.session_id,
           codex_app_server_pid: metadata.codex_app_server_pid,
           codex_input_tokens: metadata.codex_input_tokens,
@@ -1765,6 +1787,13 @@ defmodule SymphonyElixir.Orchestrator do
       thread_id: Map.get(running_entry, :thread_id),
       model: Map.get(running_entry, :model),
       reasoning_effort: Map.get(running_entry, :reasoning_effort),
+      current_context_tokens: Map.get(running_entry, :current_context_tokens),
+      model_context_window: Map.get(running_entry, :model_context_window),
+      context_usage_percent: Map.get(running_entry, :context_usage_percent),
+      checkpoint_pending: Map.get(running_entry, :checkpoint_pending, false),
+      checkpoint_state: Map.get(running_entry, :checkpoint_state, "idle"),
+      last_checkpoint_at: Map.get(running_entry, :last_checkpoint_at),
+      compaction_state: Map.get(running_entry, :compaction_state, "idle"),
       session_id: Map.get(running_entry, :session_id),
       turn_count: Map.get(running_entry, :turn_count, 0),
       started_at: Map.get(running_entry, :started_at),

@@ -209,6 +209,26 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
        }}
     )
 
+    send(
+      pid,
+      {:worker_runtime_info, issue_id,
+       %{
+         repository: "repo-one",
+         workspace_path: "/workspaces/task-one",
+         branch: "symphony/todoist-task-one",
+         thread_id: "thread-usage",
+         model: "gpt-5.6-sol",
+         reasoning_effort: "high",
+         current_context_tokens: 70,
+         model_context_window: 100,
+         context_usage_percent: 0.70,
+         checkpoint_pending: true,
+         checkpoint_state: "pending",
+         last_checkpoint_at: now,
+         compaction_state: "idle"
+       }}
+    )
+
     snapshot = GenServer.call(pid, :snapshot)
     assert %{running: [snapshot_entry]} = snapshot
     assert snapshot_entry.codex_app_server_pid == "4242"
@@ -217,6 +237,19 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert snapshot_entry.codex_output_tokens == 6
     assert snapshot_entry.codex_total_tokens == 26
     assert snapshot_entry.turn_count == 1
+    assert snapshot_entry.title == "Usage snapshot test"
+    assert snapshot_entry.repository == "repo-one"
+    assert snapshot_entry.branch == "symphony/todoist-task-one"
+    assert snapshot_entry.thread_id == "thread-usage"
+    assert snapshot_entry.model == "gpt-5.6-sol"
+    assert snapshot_entry.reasoning_effort == "high"
+    assert snapshot_entry.current_context_tokens == 70
+    assert snapshot_entry.model_context_window == 100
+    assert snapshot_entry.context_usage_percent == 0.70
+    assert snapshot_entry.checkpoint_pending
+    assert snapshot_entry.checkpoint_state == "pending"
+    assert snapshot_entry.last_checkpoint_at == now
+    assert snapshot_entry.compaction_state == "idle"
     assert is_integer(snapshot_entry.runtime_seconds)
 
     send(pid, {:DOWN, process_ref, :process, self(), :normal})
