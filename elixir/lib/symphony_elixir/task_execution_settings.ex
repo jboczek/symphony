@@ -67,8 +67,6 @@ defmodule SymphonyElixir.TaskExecutionSettings do
       {:error, _reason} ->
         invalid(:malformed_yaml)
     end
-  rescue
-    _error -> invalid(:malformed_yaml)
   end
 
   defp parse_symphony_settings(front_matter, body, original_description) do
@@ -121,7 +119,6 @@ defmodule SymphonyElixir.TaskExecutionSettings do
   end
 
   defp present_string?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present_string?(_value), do: false
 
   defp invalid(reason), do: {:error, {:invalid_task_execution_settings, reason}}
 end

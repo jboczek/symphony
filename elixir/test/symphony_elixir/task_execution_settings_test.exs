@@ -57,9 +57,11 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
 
   test "rejects invalid shapes, unknown keys, blank values, and traversal repositories" do
     invalid_descriptions = [
+      "---\n- item\n---\nTask",
       "---\nsymphony: nope\n---\nTask",
       "---\nsymphony:\n  extra: value\n---\nTask",
       "---\nsymphony:\n  model: ' '\n---\nTask",
+      "---\nsymphony:\n  model: 42\n---\nTask",
       "---\nsymphony:\n  repo: ../secrets\n---\nTask",
       "---\nsymphony:\n  repo: nested/repo\n---\nTask",
       "---\nsymphony:\n  repo: .\n---\nTask",
@@ -69,6 +71,8 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
     assert Enum.all?(invalid_descriptions, fn description ->
              match?({:error, {:invalid_task_execution_settings, _}}, TaskExecutionSettings.parse(description))
            end)
+
+    refute TaskExecutionSettings.valid_repository_name?(42)
   end
 
   test "front matter without Symphony settings preserves existing behavior" do

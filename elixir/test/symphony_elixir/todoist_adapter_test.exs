@@ -146,6 +146,7 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "todoist")
 
     Application.put_env(:symphony_elixir, :todoist_test_comments, [
+      42,
       %{
         "id" => "checkpoint-old",
         "content" => "[SYMPHONY_CHECKPOINT_V1]\nOld",

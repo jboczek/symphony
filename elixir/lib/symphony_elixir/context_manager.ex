@@ -131,9 +131,7 @@ defmodule SymphonyElixir.ContextManager do
   defp payload_at(_payload, _path), do: nil
 
   defp payload_get(payload, key) when is_map(payload) do
-    Map.get(payload, key) || Map.get(payload, String.to_existing_atom(key))
-  rescue
-    ArgumentError -> Map.get(payload, key)
+    Map.get(payload, key)
   end
 
   defp payload_get(_payload, _key), do: nil
