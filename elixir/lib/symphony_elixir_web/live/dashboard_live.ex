@@ -170,6 +170,13 @@ defmodule SymphonyElixirWeb.DashboardLive do
                     <td>
                       <div class="issue-stack">
                         <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                        <%= if entry[:runtime] do %>
+                          <span class="muted"><%= entry.runtime.title || "Untitled task" %></span>
+                          <span class="muted mono">
+                            <%= entry.runtime.repository || "default workspace" %>
+                            <%= if entry.runtime.branch do %> · <%= entry.runtime.branch %><% end %>
+                          </span>
+                        <% end %>
                         <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
                       </div>
                     </td>
@@ -193,6 +200,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
                         <% else %>
                           <span class="muted">n/a</span>
                         <% end %>
+                        <%= if entry[:runtime] do %>
+                          <span class="muted"><%= entry.runtime.model || "default model" %> · <%= entry.runtime.reasoning_effort || "default effort" %></span>
+                          <span class="muted">checkpoint <%= entry.runtime.checkpoint_state || "idle" %> · compact <%= entry.runtime.compaction_state || "idle" %></span>
+                        <% end %>
                       </div>
                     </td>
                     <td class="numeric"><%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %></td>
@@ -215,6 +226,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
                         <span>Raw in: <%= format_int(entry.tokens.input_tokens) %></span>
                         <span>Cached in: <%= format_int(entry.tokens.cached_input_tokens) %></span>
                         <span class="muted">Out: <%= format_int(entry.tokens.output_tokens) %></span>
+                        <%= if entry[:runtime] && entry.runtime.context_usage_percent do %>
+                          <span class="muted">
+                            Context: <%= format_percent(entry.runtime.context_usage_percent) %>
+                            (<%= format_int(entry.runtime.current_context_tokens) %>/<%= format_int(entry.runtime.model_context_window) %>)
+                          </span>
+                        <% end %>
                       </div>
                     </td>
                   </tr>
@@ -512,6 +529,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   defp format_int(_value), do: "n/a"
+
+  defp format_percent(value) when is_number(value),
+    do: :erlang.float_to_binary(value * 100, decimals: 1) <> "%"
+
+  defp format_percent(_value), do: "n/a"
 
   defp state_badge_class(state) do
     base = "state-badge"

@@ -32,9 +32,9 @@ If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or 
 Symphony stops the active agent for that issue and cleans up matching workspaces.
 
 If Codex reports that operator input, approval, or MCP elicitation is required, Symphony keeps the
-issue claimed and exposes it as blocked in the runtime state, JSON API, and dashboard. Blocked
-entries are in memory only; restarting the orchestrator clears that blocked map, so any still-active
-tracker issue can become a dispatch candidate again after restart.
+issue claimed and exposes it as blocked in the runtime state, JSON API, and dashboard. For Todoist,
+configuration and genuine external blockers also create a concise comment and move the task to the
+non-active `Blocked` section. Other adapters retain the in-memory blocking behavior.
 
 ## How to use it
 
@@ -133,6 +133,8 @@ tracker:
     project_slug: "..."
 workspace:
   root: ~/code/workspaces
+repositories:
+  root: ~/code
 hooks:
   after_create: |
     git clone git@github.com:your-org/your-repo.git .
@@ -141,6 +143,9 @@ agent:
   max_turns: 20
 codex:
   command: codex app-server
+context_management:
+  enabled: true
+  checkpoint_threshold: 0.70
 ---
 
 You are working on an issue from the configured tracker {{ issue.identifier }}.
@@ -173,6 +178,11 @@ Notes:
   by the Codex turn sandbox.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `repositories.root` is the parent directory for Todoist-selected local repositories. It defaults
+  to `/Users/your-username/git`; task values resolve by exact direct-child name only.
+- `context_management.enabled` defaults to `true`; `checkpoint_threshold` defaults to `0.70` and
+  must be greater than `0` and at most `1`. Todoist workers calculate usage from the current App
+  Server context (`tokenUsage.last.totalTokens / modelContextWindow`), not lifetime token totals.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
@@ -293,14 +303,39 @@ codex:
   adapter uses the authenticated official `td` executable; no Todoist token belongs in the workflow
   or the Codex environment.
 - Startup validation: the project name must resolve uniquely. Its `Backlog`, `Todo`, `InProgress`,
-  `HumanReview`, `Rework`, `Merging`, and `Done` sections must already exist exactly once. Startup
-  never creates, renames, archives, or deletes project structure.
+  `Blocked`, `HumanReview`, `Rework`, `Merging`, and `Done` sections must already exist exactly
+  once. Startup never creates, renames, archives, or deletes project structure. `Blocked` is not an
+  active dispatch state; moving a task back to `InProgress`, `Rework`, or another configured active
+  section makes it eligible again.
 - Scope: the adapter resolves and caches the canonical project and section IDs, scopes CLI reads to
   that project, and revalidates every returned task, destination section, and comment parent before
   mutation. New tasks are forced into `_agents` / `Backlog`.
 - States and issues: the task's section is its state; `TODOIST-<task-id>` is its Symphony identifier;
   labels, priority, timestamps, URL, and native project/task/section IDs are normalized; Todoist
   parent/subtask relations do not become blockers.
+- Per-task execution settings: a description may begin with YAML front matter containing exact
+  `symphony.repo`, `symphony.model`, and `symphony.thinking` values. `repo` selects a local Git
+  repository under `repositories.root`; Symphony creates an isolated
+  `symphony/todoist-<task-id>` worktree and reuses it by stable task ID after title changes. Model
+  and reasoning values are passed directly to App Server and validated with `model/list`. Invalid
+  front matter or unavailable values are commented and moved to `Blocked`.
+
+  ```yaml
+  ---
+  symphony:
+    repo: cse.tools.prompts
+    model: gpt-5.6-sol
+    thinking: high
+  ---
+
+  Implement the requested change.
+  ```
+
+- Context recovery: when current context reaches the configured threshold, Symphony waits for the
+  turn boundary, invokes `.codex/skills/checkpoint/SKILL.md` as an explicit App Server skill input,
+  verifies a new Todoist comment whose first line is `[SYMPHONY_CHECKPOINT_V1]`, waits for
+  `thread/compact/start` to finish, and resumes the same thread from the newest checkpoint. A
+  missing checkpoint prevents compaction; compaction failure leaves the durable comment intact.
 - Tool: the structured `todoist` tool exposes only task get/move/update/create, comment
   list/create/update, and persistent Workpad upsert. It does not expose arbitrary CLI, completion,
   deletion, archive, project, or section operations. `workpad_upsert` reuses the one comment that
@@ -309,7 +344,8 @@ codex:
   output, ambiguous/missing scope, missing sections, and cross-project access return structured
   failures. Tool-facing failures do not include CLI diagnostics or credentials.
 - Runnable profile: `WORKFLOW.todoist.md` uses GPT-5.6 Luna at `xhigh`, approval policy `never`, a
-  workspace-write turn sandbox with network access, and the existing `_agents` section lifecycle.
+  workspace-write turn sandbox with network access, automatic 70% context checkpointing, and the
+  `_agents` section lifecycle including `Blocked`.
 
 ### GitLab adapter
 
@@ -331,6 +367,8 @@ The observability UI now runs on a minimal Phoenix stack:
 - Dark-mode metrics split Codex usage into raw input, cached input, and output tokens
 - A bounded `Completed Sessions` section shows the latest 50 ended sessions, including failures;
   this history is kept in memory for the current process only
+- Runtime snapshots expose task title/state, repository/worktree/branch, App Server thread/session,
+  model/reasoning, current context/window/percentage, checkpoint status/time, and compaction state
 
 ## Project Layout
 
