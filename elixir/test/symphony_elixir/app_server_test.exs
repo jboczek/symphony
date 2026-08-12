@@ -1496,6 +1496,134 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
+  test "task model and reasoning overrides are validated and applied" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-model-overrides-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "todoist-task-42-model-override")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex.trace")
+      previous_trace = System.get_env("SYMP_TEST_CODEX_TRACE")
+
+      on_exit(fn -> restore_env("SYMP_TEST_CODEX_TRACE", previous_trace) end)
+      System.put_env("SYMP_TEST_CODEX_TRACE", trace_file)
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' "$line" >> "$SYMP_TEST_CODEX_TRACE"
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) ;;
+          3) printf '%s\\n' '{"id":4,"result":{"data":[{"id":"gpt-5.6-sol","model":"gpt-5.6-sol","isDefault":true,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}]}]}}' ;;
+          4) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-model","model":"gpt-5.6-sol","reasoningEffort":"high"}}}' ;;
+          5)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-model"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      issue = %Issue{
+        id: "task-42",
+        identifier: "Task 42",
+        title: "Model override",
+        state: "In Progress",
+        execution_settings: %SymphonyElixir.TaskExecutionSettings{
+          model: "gpt-5.6-sol",
+          thinking: "high"
+        }
+      }
+
+      assert {:ok, _result} =
+               AppServer.run(workspace, "Use the task model", issue, execution_settings: issue.execution_settings)
+
+      payloads =
+        trace_file
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.map(&(&1 |> String.trim_leading("JSON:") |> Jason.decode!()))
+
+      assert Enum.any?(payloads, &(&1["method"] == "model/list"))
+
+      assert Enum.any?(payloads, fn payload ->
+               payload["method"] == "thread/start" &&
+                 get_in(payload, ["params", "model"]) == "gpt-5.6-sol" &&
+                 get_in(payload, ["params", "config", "model_reasoning_effort"]) == "high"
+             end)
+
+      assert Enum.any?(payloads, fn payload ->
+               payload["method"] == "turn/start" &&
+                 get_in(payload, ["params", "model"]) == "gpt-5.6-sol" &&
+                 get_in(payload, ["params", "effort"]) == "high"
+             end)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "unsupported task reasoning effort fails before thread creation" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-invalid-effort-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "todoist-task-43-invalid-effort")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r _line; do
+        count=$((count + 1))
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) ;;
+          3) printf '%s\\n' '{"id":4,"result":{"data":[{"id":"gpt-5.6-sol","model":"gpt-5.6-sol","isDefault":true,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"high"}]}]}}' ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      settings = %SymphonyElixir.TaskExecutionSettings{
+        model: "gpt-5.6-sol",
+        thinking: "ultra"
+      }
+
+      assert {:error, {:invalid_task_execution_settings, {:unsupported_reasoning_effort, "gpt-5.6-sol", "ultra"}}} =
+               AppServer.start_session(workspace, execution_settings: settings)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "app server launches over ssh for remote workers" do
     test_root =
       Path.join(

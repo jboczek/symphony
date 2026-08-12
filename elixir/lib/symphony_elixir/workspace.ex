@@ -10,6 +10,14 @@ defmodule SymphonyElixir.Workspace do
 
   @type worker_host :: String.t() | nil
 
+  @spec runtime_info(map(), Path.t()) :: %{repository: String.t() | nil, branch: String.t() | nil}
+  def runtime_info(%{execution_settings: %TaskExecutionSettings{repo: repository}} = issue, _workspace)
+      when is_binary(repository) do
+    %{repository: repository, branch: "symphony/#{workspace_identity(issue)}"}
+  end
+
+  def runtime_info(_issue, _workspace), do: %{repository: nil, branch: nil}
+
   @spec create_for_issue(map() | String.t() | nil, worker_host()) ::
           {:ok, Path.t()} | {:error, term()}
   def create_for_issue(issue_or_identifier, worker_host \\ nil) do

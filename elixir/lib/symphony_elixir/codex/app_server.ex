@@ -4,11 +4,12 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH, TaskExecutionSettings}
 
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
+  @model_list_id 4
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
   @type session :: %{
@@ -16,6 +17,8 @@ defmodule SymphonyElixir.Codex.AppServer do
           metadata: map(),
           model: String.t() | nil,
           reasoning_effort: String.t() | nil,
+          effective_model: String.t() | nil,
+          effective_reasoning_effort: String.t() | nil,
           approval_policy: String.t() | map(),
           auto_approve_requests: boolean(),
           thread_sandbox: String.t(),
@@ -40,26 +43,37 @@ defmodule SymphonyElixir.Codex.AppServer do
   @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
+    execution_settings = Keyword.get(opts, :execution_settings)
     dynamic_tool_binding = DynamicTool.bind()
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
          {:ok, port} <- start_port(expanded_workspace, worker_host, dynamic_tool_binding) do
       metadata = port_metadata(port, worker_host)
 
-      with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
-           {:ok, thread_id} <-
-             do_start_session(port, expanded_workspace, session_policies, dynamic_tool_binding) do
+      with {:ok, configured_policies} <- session_policies(expanded_workspace, worker_host),
+           {:ok, session_policies, validate_overrides?} <-
+             apply_execution_settings(configured_policies, execution_settings),
+           {:ok, thread} <-
+             do_start_session(
+               port,
+               expanded_workspace,
+               session_policies,
+               dynamic_tool_binding,
+               validate_overrides?
+             ) do
         {:ok,
          %{
            port: port,
            metadata: metadata,
            model: session_policies.model,
            reasoning_effort: session_policies.reasoning_effort,
+           effective_model: thread.model,
+           effective_reasoning_effort: thread.reasoning_effort,
            approval_policy: session_policies.approval_policy,
            auto_approve_requests: session_policies.approval_policy == "never",
            thread_sandbox: session_policies.thread_sandbox,
            turn_sandbox_policy: session_policies.turn_sandbox_policy,
-           thread_id: thread_id,
+           thread_id: thread.id,
            workspace: expanded_workspace,
            worker_host: worker_host,
            dynamic_tool_binding: dynamic_tool_binding
@@ -316,12 +330,96 @@ defmodule SymphonyElixir.Codex.AppServer do
     Config.codex_runtime_settings(workspace, remote: true)
   end
 
-  defp do_start_session(port, workspace, session_policies, dynamic_tool_binding) do
-    case send_initialize(port) do
-      :ok -> start_thread(port, workspace, session_policies, dynamic_tool_binding)
-      {:error, reason} -> {:error, reason}
+  defp apply_execution_settings(policies, %TaskExecutionSettings{} = settings) do
+    validate_overrides? = is_binary(settings.model) or is_binary(settings.thinking)
+
+    {:ok,
+     %{
+       policies
+       | model: settings.model || policies.model,
+         reasoning_effort: settings.thinking || policies.reasoning_effort
+     }, validate_overrides?}
+  end
+
+  defp apply_execution_settings(policies, nil), do: {:ok, policies, false}
+
+  defp apply_execution_settings(_policies, {:error, reason}), do: {:error, reason}
+
+  defp do_start_session(
+         port,
+         workspace,
+         session_policies,
+         dynamic_tool_binding,
+         validate_overrides?
+       ) do
+    with :ok <- send_initialize(port),
+         {:ok, effective_settings} <-
+           resolve_effective_model_settings(port, session_policies, validate_overrides?) do
+      start_thread(
+        port,
+        workspace,
+        session_policies,
+        dynamic_tool_binding,
+        effective_settings
+      )
     end
   end
+
+  defp resolve_effective_model_settings(_port, policies, false) do
+    {:ok, %{model: policies.model, reasoning_effort: policies.reasoning_effort}}
+  end
+
+  defp resolve_effective_model_settings(port, policies, true) do
+    send_message(port, %{
+      "method" => "model/list",
+      "id" => @model_list_id,
+      "params" => %{"includeHidden" => true, "limit" => 100}
+    })
+
+    with {:ok, %{"data" => models}} when is_list(models) <- await_response(port, @model_list_id),
+         {:ok, model} <- select_model(models, policies.model),
+         {:ok, reasoning_effort} <- select_reasoning_effort(model, policies.reasoning_effort) do
+      {:ok, %{model: model_identifier(model), reasoning_effort: reasoning_effort}}
+    else
+      {:error, {:invalid_task_execution_settings, _reason}} = error -> error
+      {:error, reason} -> {:error, {:invalid_task_execution_settings, {:model_catalog_failed, reason}}}
+      payload -> {:error, {:invalid_task_execution_settings, {:invalid_model_catalog, payload}}}
+    end
+  end
+
+  defp select_model(models, nil) do
+    case Enum.find(models, &(&1["isDefault"] == true)) do
+      nil -> {:error, {:invalid_task_execution_settings, :default_model_not_found}}
+      model -> {:ok, model}
+    end
+  end
+
+  defp select_model(models, requested_model) when is_binary(requested_model) do
+    case Enum.find(models, fn model ->
+           requested_model in [model["id"], model["model"]]
+         end) do
+      nil -> {:error, {:invalid_task_execution_settings, {:unknown_model, requested_model}}}
+      model -> {:ok, model}
+    end
+  end
+
+  defp select_reasoning_effort(model, nil), do: {:ok, model["defaultReasoningEffort"]}
+
+  defp select_reasoning_effort(model, requested_effort) when is_binary(requested_effort) do
+    supported_efforts =
+      model
+      |> Map.get("supportedReasoningEfforts", [])
+      |> Enum.map(& &1["reasoningEffort"])
+
+    if requested_effort in supported_efforts do
+      {:ok, requested_effort}
+    else
+      reason = {:unsupported_reasoning_effort, model_identifier(model), requested_effort}
+      {:error, {:invalid_task_execution_settings, reason}}
+    end
+  end
+
+  defp model_identifier(model), do: model["id"] || model["model"]
 
   defp start_thread(
          port,
@@ -332,7 +430,8 @@ defmodule SymphonyElixir.Codex.AppServer do
            approval_policy: approval_policy,
            thread_sandbox: thread_sandbox
          },
-         dynamic_tool_binding
+         dynamic_tool_binding,
+         effective_settings
        ) do
     params =
       %{
@@ -351,10 +450,20 @@ defmodule SymphonyElixir.Codex.AppServer do
     })
 
     case await_response(port, @thread_start_id) do
-      {:ok, %{"thread" => thread_payload}} ->
+      {:ok, %{"thread" => thread_payload} = response} ->
         case thread_payload do
-          %{"id" => thread_id} -> {:ok, thread_id}
-          _ -> {:error, {:invalid_thread_payload, thread_payload}}
+          %{"id" => thread_id} ->
+            {:ok,
+             %{
+               id: thread_id,
+               model: response["model"] || thread_payload["model"] || effective_settings.model,
+               reasoning_effort:
+                 response["reasoningEffort"] || thread_payload["reasoningEffort"] ||
+                   effective_settings.reasoning_effort
+             }}
+
+          _ ->
+            {:error, {:invalid_thread_payload, thread_payload}}
         end
 
       other ->
