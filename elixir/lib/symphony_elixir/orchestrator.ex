@@ -166,6 +166,11 @@ defmodule SymphonyElixir.Orchestrator do
           running_entry
           |> maybe_put_runtime_value(:worker_host, runtime_info[:worker_host])
           |> maybe_put_runtime_value(:workspace_path, runtime_info[:workspace_path])
+          |> maybe_put_runtime_value(:repository, runtime_info[:repository])
+          |> maybe_put_runtime_value(:branch, runtime_info[:branch])
+          |> maybe_put_runtime_value(:thread_id, runtime_info[:thread_id])
+          |> maybe_put_runtime_value(:model, runtime_info[:model])
+          |> maybe_put_runtime_value(:reasoning_effort, runtime_info[:reasoning_effort])
 
         notify_dashboard()
         {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
@@ -979,6 +984,11 @@ defmodule SymphonyElixir.Orchestrator do
             issue: issue,
             worker_host: worker_host,
             workspace_path: nil,
+            repository: nil,
+            branch: nil,
+            thread_id: nil,
+            model: nil,
+            reasoning_effort: nil,
             session_id: nil,
             last_codex_message: nil,
             last_codex_timestamp: nil,
@@ -1435,6 +1445,11 @@ defmodule SymphonyElixir.Orchestrator do
           state: metadata.issue.state,
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
+          repository: Map.get(metadata, :repository),
+          branch: Map.get(metadata, :branch),
+          thread_id: Map.get(metadata, :thread_id),
+          model: Map.get(metadata, :model),
+          reasoning_effort: Map.get(metadata, :reasoning_effort),
           session_id: metadata.session_id,
           codex_app_server_pid: metadata.codex_app_server_pid,
           codex_input_tokens: metadata.codex_input_tokens,
@@ -1666,6 +1681,11 @@ defmodule SymphonyElixir.Orchestrator do
       error: completed_session_error(reason),
       worker_host: Map.get(running_entry, :worker_host),
       workspace_path: Map.get(running_entry, :workspace_path),
+      repository: Map.get(running_entry, :repository),
+      branch: Map.get(running_entry, :branch),
+      thread_id: Map.get(running_entry, :thread_id),
+      model: Map.get(running_entry, :model),
+      reasoning_effort: Map.get(running_entry, :reasoning_effort),
       session_id: Map.get(running_entry, :session_id),
       turn_count: Map.get(running_entry, :turn_count, 0),
       started_at: Map.get(running_entry, :started_at),
