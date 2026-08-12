@@ -111,6 +111,37 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
     assert Adapter.normalize_issue_for_test(Map.put(task("53"), "description", nil), scope()).description == nil
   end
 
+  test "normalizes Symphony front matter into typed execution settings" do
+    description = """
+    ---
+    symphony:
+      repo: cse.tools.prompts
+      model: gpt-5.6-sol
+      thinking: high
+    ---
+
+    Human task description.
+    """
+
+    issue =
+      task("settings")
+      |> Map.put("description", description)
+      |> Adapter.normalize_issue_for_test(scope())
+
+    assert issue.description == "Human task description."
+    assert issue.execution_settings.repo == "cse.tools.prompts"
+    assert issue.execution_settings.model == "gpt-5.6-sol"
+    assert issue.execution_settings.thinking == "high"
+
+    malformed =
+      task("invalid-settings")
+      |> Map.put("description", "---\nsymphony: [\n---\nTask")
+      |> Adapter.normalize_issue_for_test(scope())
+
+    assert malformed.execution_settings ==
+             {:error, {:invalid_task_execution_settings, :malformed_yaml}}
+  end
+
   test "fetches requested states and IDs while dropping or rejecting malformed records" do
     Application.put_env(:symphony_elixir, :todoist_test_tasks, [
       task("todo"),

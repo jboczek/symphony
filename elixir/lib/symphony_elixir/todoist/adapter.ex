@@ -8,6 +8,7 @@ defmodule SymphonyElixir.Todoist.Adapter do
   require Logger
 
   alias SymphonyElixir.Config
+  alias SymphonyElixir.TaskExecutionSettings
   alias SymphonyElixir.Todoist.AgentTool
   alias SymphonyElixir.Tracker.Issue
 
@@ -102,6 +103,8 @@ defmodule SymphonyElixir.Todoist.Adapter do
     section = Map.get(sections_by_id, section_id)
 
     if present_string?(id) and present_string?(content) and valid_section?(section, project_id) do
+      {description, execution_settings} = normalize_description(task["description"])
+
       %Issue{
         id: id,
         native_ref: %{
@@ -111,7 +114,8 @@ defmodule SymphonyElixir.Todoist.Adapter do
         },
         identifier: "TODOIST-#{id}",
         title: content,
-        description: blank_to_nil(task["description"]),
+        description: description,
+        execution_settings: execution_settings,
         priority: normalize_priority(task["priority"]),
         state: section.name,
         branch_name: nil,
@@ -186,6 +190,13 @@ defmodule SymphonyElixir.Todoist.Adapter do
   end
 
   defp blank_to_nil(_value), do: nil
+
+  defp normalize_description(description) do
+    case TaskExecutionSettings.parse(description) do
+      {:ok, settings, body} -> {blank_to_nil(body), settings}
+      {:error, _reason} = error -> {blank_to_nil(description), error}
+    end
+  end
 
   defp normalize_state(value) when is_binary(value), do: value |> String.trim() |> String.downcase()
   defp normalize_state(_value), do: ""
