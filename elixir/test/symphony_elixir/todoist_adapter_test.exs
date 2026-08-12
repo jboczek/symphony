@@ -32,12 +32,18 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
       send(Application.fetch_env!(:symphony_elixir, :todoist_test_pid), {:todoist_move_task, task_id, section})
       {:ok, %{"id" => task_id, "section" => section}}
     end
+
+    @spec list_comments(map(), String.t()) :: {:ok, [map()]}
+    def list_comments(_settings, _task_id) do
+      {:ok, Application.get_env(:symphony_elixir, :todoist_test_comments, [])}
+    end
   end
 
   setup do
     previous_cli = Application.get_env(:symphony_elixir, :todoist_cli_module)
     previous_tasks = Application.get_env(:symphony_elixir, :todoist_test_tasks)
     previous_test_pid = Application.get_env(:symphony_elixir, :todoist_test_pid)
+    previous_comments = Application.get_env(:symphony_elixir, :todoist_test_comments)
 
     Application.put_env(:symphony_elixir, :todoist_cli_module, FakeCLI)
     Application.put_env(:symphony_elixir, :todoist_test_pid, self())
@@ -46,6 +52,7 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
       restore_app_env(:todoist_cli_module, previous_cli)
       restore_app_env(:todoist_test_tasks, previous_tasks)
       restore_app_env(:todoist_test_pid, previous_test_pid)
+      restore_app_env(:todoist_test_comments, previous_comments)
     end)
 
     :ok
@@ -133,6 +140,32 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
     assert comment =~ "[SYMPHONY_BLOCKED_V1]"
     assert comment =~ "Repository access is missing"
     assert_received {:todoist_move_task, "blocked-1", "Blocked"}
+  end
+
+  test "selects the newest Todoist checkpoint whose first line is the marker" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "todoist")
+
+    Application.put_env(:symphony_elixir, :todoist_test_comments, [
+      %{
+        "id" => "checkpoint-old",
+        "content" => "[SYMPHONY_CHECKPOINT_V1]\nOld",
+        "postedAt" => "2026-08-12T08:00:00Z"
+      },
+      %{
+        "id" => "not-a-checkpoint",
+        "content" => "Note\n[SYMPHONY_CHECKPOINT_V1]",
+        "postedAt" => "2026-08-12T10:00:00Z"
+      },
+      %{
+        "id" => "checkpoint-new",
+        "content" => "[SYMPHONY_CHECKPOINT_V1]\nNew",
+        "postedAt" => "2026-08-12T09:00:00Z"
+      }
+    ])
+
+    issue = Adapter.normalize_issue_for_test(task("checkpoint-task"), scope())
+
+    assert {:ok, %{"id" => "checkpoint-new"}} = Adapter.latest_checkpoint_comment(issue)
   end
 
   test "orchestrator blocks malformed task configuration before starting a worker" do

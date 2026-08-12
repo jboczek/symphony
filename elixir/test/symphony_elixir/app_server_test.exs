@@ -1624,6 +1624,105 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
+  test "checkpoint skill input and compaction lifecycle stay on the same thread" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-compaction-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "todoist-task-compact")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex.trace")
+      skill_path = Path.join(workspace, ".codex/skills/checkpoint/SKILL.md")
+      previous_trace = System.get_env("SYMP_TEST_CODEX_TRACE")
+
+      on_exit(fn -> restore_env("SYMP_TEST_CODEX_TRACE", previous_trace) end)
+      System.put_env("SYMP_TEST_CODEX_TRACE", trace_file)
+      File.mkdir_p!(Path.dirname(skill_path))
+      File.write!(skill_path, "checkpoint")
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' "$line" >> "$SYMP_TEST_CODEX_TRACE"
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) ;;
+          3) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-compact"}}}' ;;
+          4)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-checkpoint"}}}'
+            printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-compact","turn":{"id":"turn-checkpoint"}}}'
+            ;;
+          5)
+            printf '%s\\n' '{"id":5,"result":{}}'
+            printf '%s\\n' '{"method":"turn/started","params":{"threadId":"thread-compact","turn":{"id":"turn-compact"}}}'
+            printf '%s\\n' '{"method":"item/started","params":{"threadId":"thread-compact","turnId":"turn-compact","item":{"type":"contextCompaction","id":"compact-item"}}}'
+            printf '%s\\n' '{"method":"item/completed","params":{"threadId":"thread-compact","turnId":"turn-compact","item":{"type":"contextCompaction","id":"compact-item"}}}'
+            printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-compact","turn":{"id":"turn-compact"}}}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      issue = %Issue{
+        id: "task-compact",
+        identifier: "TODOIST-task-compact",
+        title: "Compact context",
+        state: "InProgress"
+      }
+
+      assert {:ok, session} = AppServer.start_session(workspace)
+
+      try do
+        input = [
+          %{"type" => "skill", "name" => "checkpoint", "path" => skill_path},
+          %{"type" => "text", "text" => "Create checkpoint"}
+        ]
+
+        assert {:ok, checkpoint_turn} =
+                 AppServer.run_turn(session, "checkpoint", issue, input: input)
+
+        assert checkpoint_turn.thread_id == "thread-compact"
+        assert :ok = AppServer.compact_thread(session)
+      after
+        AppServer.stop_session(session)
+      end
+
+      payloads =
+        trace_file
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.map(&(&1 |> String.trim_leading("JSON:") |> Jason.decode!()))
+
+      checkpoint_request = Enum.find(payloads, &(&1["method"] == "turn/start"))
+
+      assert get_in(checkpoint_request, ["params", "threadId"]) == "thread-compact"
+
+      assert get_in(checkpoint_request, ["params", "input"]) == [
+               %{"type" => "skill", "name" => "checkpoint", "path" => skill_path},
+               %{"type" => "text", "text" => "Create checkpoint"}
+             ]
+
+      compact_request = Enum.find(payloads, &(&1["method"] == "thread/compact/start"))
+      assert get_in(compact_request, ["params", "threadId"]) == "thread-compact"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "app server launches over ssh for remote workers" do
     test_root =
       Path.join(

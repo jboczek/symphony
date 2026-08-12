@@ -13,6 +13,7 @@ defmodule SymphonyElixir.Todoist.Adapter do
   alias SymphonyElixir.Tracker.Issue
 
   @blocked_comment_marker "[SYMPHONY_BLOCKED_V1]"
+  @checkpoint_comment_marker "[SYMPHONY_CHECKPOINT_V1]"
 
   @impl true
   def validate_config(tracker_settings) do
@@ -81,6 +82,20 @@ defmodule SymphonyElixir.Todoist.Adapter do
     with {:ok, _comment} <- cli_module().create_comment(tracker_settings, task_id, comment),
          {:ok, _task} <- cli_module().move_task(tracker_settings, task_id, "Blocked") do
       :ok
+    end
+  end
+
+  @impl true
+  def latest_checkpoint_comment(%Issue{id: task_id}) when is_binary(task_id) do
+    with {:ok, comments} <- cli_module().list_comments(Config.settings!().tracker, task_id) do
+      comments
+      |> Enum.with_index()
+      |> Enum.filter(fn {comment, _index} -> checkpoint_comment?(comment) end)
+      |> Enum.max_by(fn {comment, index} -> {comment_timestamp(comment), index} end, fn -> nil end)
+      |> case do
+        {comment, _index} -> {:ok, comment}
+        nil -> {:ok, nil}
+      end
     end
   end
 
@@ -209,6 +224,19 @@ defmodule SymphonyElixir.Todoist.Adapter do
       {:ok, settings, body} -> {blank_to_nil(body), settings}
       {:error, _reason} = error -> {blank_to_nil(description), error}
     end
+  end
+
+  defp checkpoint_comment?(%{"content" => content}) when is_binary(content) do
+    content
+    |> String.split(~r/\R/, parts: 2)
+    |> List.first()
+    |> Kernel.==(@checkpoint_comment_marker)
+  end
+
+  defp checkpoint_comment?(_comment), do: false
+
+  defp comment_timestamp(comment) do
+    comment["postedAt"] || comment["addedAt"] || comment["createdAt"] || ""
   end
 
   defp normalize_state(value) when is_binary(value), do: value |> String.trim() |> String.downcase()

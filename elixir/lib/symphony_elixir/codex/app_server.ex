@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   @thread_start_id 2
   @turn_start_id 3
   @model_list_id 4
+  @compact_thread_id 5
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
   @type session :: %{
@@ -117,7 +118,12 @@ defmodule SymphonyElixir.Codex.AppServer do
       approval_policy: approval_policy
     }
 
-    case start_turn(port, thread_id, prompt, issue, workspace, turn_settings, turn_sandbox_policy) do
+    turn_input =
+      Keyword.get_lazy(opts, :input, fn ->
+        [%{"type" => "text", "text" => prompt}]
+      end)
+
+    case start_turn(port, thread_id, turn_input, issue, workspace, turn_settings, turn_sandbox_policy) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
@@ -171,6 +177,31 @@ defmodule SymphonyElixir.Codex.AppServer do
   @spec stop_session(session()) :: :ok
   def stop_session(%{port: port}) when is_port(port) do
     stop_port(port)
+  end
+
+  @spec compact_thread(session(), keyword()) :: :ok | {:error, term()}
+  def compact_thread(%{port: port, thread_id: thread_id, metadata: metadata}, opts \\ []) do
+    on_message = Keyword.get(opts, :on_message, &default_on_message/1)
+
+    send_message(port, %{
+      "method" => "thread/compact/start",
+      "id" => @compact_thread_id,
+      "params" => %{"threadId" => thread_id}
+    })
+
+    await_compaction(
+      port,
+      on_message,
+      metadata,
+      %{
+        response?: false,
+        item_id: nil,
+        item_completed?: false,
+        turn_completed?: false,
+        compacted?: false
+      },
+      ""
+    )
   end
 
   defp validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
@@ -474,7 +505,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp start_turn(
          port,
          thread_id,
-         prompt,
+         input,
          issue,
          workspace,
          %{
@@ -487,12 +518,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     params =
       %{
         "threadId" => thread_id,
-        "input" => [
-          %{
-            "type" => "text",
-            "text" => prompt
-          }
-        ],
+        "input" => input,
         "cwd" => workspace,
         "title" => "#{issue.identifier}: #{issue.title}",
         "approvalPolicy" => approval_policy,
@@ -529,6 +555,160 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   defp maybe_put(params, _key, nil), do: params
   defp maybe_put(params, key, value), do: Map.put(params, key, value)
+
+  defp await_compaction(port, on_message, metadata, state, pending_line) do
+    receive do
+      {^port, {:data, {:eol, chunk}}} ->
+        complete_line = pending_line <> to_string(chunk)
+        handle_compaction_message(port, on_message, metadata, state, complete_line)
+
+      {^port, {:data, {:noeol, chunk}}} ->
+        await_compaction(port, on_message, metadata, state, pending_line <> to_string(chunk))
+
+      {^port, {:exit_status, status}} ->
+        {:error, {:port_exit, status}}
+    after
+      Config.settings!().codex.turn_timeout_ms ->
+        {:error, :compaction_timeout}
+    end
+  end
+
+  defp handle_compaction_message(port, on_message, metadata, state, data) do
+    case Jason.decode(to_string(data)) do
+      {:ok, payload} ->
+        handle_compaction_payload(port, on_message, metadata, state, payload)
+
+      {:error, _reason} ->
+        log_non_json_stream_line(data, "compaction stream")
+        continue_compaction(port, on_message, metadata, state)
+    end
+  end
+
+  defp handle_compaction_payload(
+         _port,
+         _on_message,
+         _metadata,
+         _state,
+         %{"id" => @compact_thread_id, "error" => error}
+       ),
+       do: {:error, {:response_error, error}}
+
+  defp handle_compaction_payload(
+         port,
+         on_message,
+         metadata,
+         state,
+         %{"id" => @compact_thread_id, "result" => _result}
+       ),
+       do: continue_compaction(port, on_message, metadata, %{state | response?: true})
+
+  defp handle_compaction_payload(
+         port,
+         on_message,
+         metadata,
+         state,
+         %{"method" => "item/started"} = payload
+       ) do
+    case get_in(payload, ["params", "item"]) do
+      %{"type" => "contextCompaction", "id" => item_id} ->
+        emit_message(on_message, :compaction_started, %{payload: payload}, metadata)
+        continue_compaction(port, on_message, metadata, %{state | item_id: item_id})
+
+      _item ->
+        continue_with_compaction_notification(port, on_message, metadata, state, payload)
+    end
+  end
+
+  defp handle_compaction_payload(
+         port,
+         on_message,
+         metadata,
+         state,
+         %{"method" => "item/completed"} = payload
+       ) do
+    item = get_in(payload, ["params", "item"])
+
+    item_completed? =
+      is_binary(state.item_id) and is_map(item) and
+        (item["id"] == state.item_id or item["type"] == "contextCompaction")
+
+    emit_message(on_message, :notification, %{payload: payload}, metadata)
+
+    continue_compaction(
+      port,
+      on_message,
+      metadata,
+      %{state | item_completed?: state.item_completed? or item_completed?}
+    )
+  end
+
+  defp handle_compaction_payload(
+         port,
+         on_message,
+         metadata,
+         state,
+         %{"method" => "thread/compacted"} = payload
+       ) do
+    emit_message(on_message, :compaction_completed, %{payload: payload}, metadata)
+    continue_compaction(port, on_message, metadata, %{state | compacted?: true})
+  end
+
+  defp handle_compaction_payload(
+         port,
+         on_message,
+         metadata,
+         state,
+         %{"method" => "turn/completed"} = payload
+       ) do
+    emit_message(on_message, :notification, %{payload: payload}, metadata)
+    continue_compaction(port, on_message, metadata, %{state | turn_completed?: true})
+  end
+
+  defp handle_compaction_payload(
+         _port,
+         _on_message,
+         _metadata,
+         _state,
+         %{"method" => method} = payload
+       )
+       when method in ["turn/failed", "turn/cancelled"],
+       do: {:error, {:compaction_failed, payload}}
+
+  defp handle_compaction_payload(
+         port,
+         on_message,
+         metadata,
+         state,
+         %{"method" => _method} = payload
+       ),
+       do: continue_with_compaction_notification(port, on_message, metadata, state, payload)
+
+  defp handle_compaction_payload(port, on_message, metadata, state, _payload),
+    do: continue_compaction(port, on_message, metadata, state)
+
+  defp continue_with_compaction_notification(port, on_message, metadata, state, payload) do
+    emit_message(on_message, :notification, %{payload: payload}, metadata)
+    continue_compaction(port, on_message, metadata, state)
+  end
+
+  defp continue_compaction(_port, on_message, metadata, %{
+         response?: true,
+         item_completed?: true,
+         turn_completed?: true
+       }) do
+    emit_message(on_message, :compaction_completed, %{}, metadata)
+    :ok
+  end
+
+  defp continue_compaction(_port, _on_message, _metadata, %{
+         response?: true,
+         compacted?: true
+       }),
+       do: :ok
+
+  defp continue_compaction(port, on_message, metadata, state) do
+    await_compaction(port, on_message, metadata, state, "")
+  end
 
   defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
     receive_loop(

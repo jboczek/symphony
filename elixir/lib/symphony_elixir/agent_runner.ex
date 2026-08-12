@@ -5,7 +5,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, PromptBuilder, Tracker, Workspace}
+  alias SymphonyElixir.{Config, ContextManager, PromptBuilder, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
   @type worker_host :: String.t() | nil
@@ -24,6 +24,7 @@ defmodule SymphonyElixir.AgentRunner do
     :workspace_outside_root,
     :invalid_workspace_cwd
   ]
+  @checkpoint_skill_path Path.expand("../../../.codex/skills/checkpoint/SKILL.md", __DIR__)
 
   @doc false
   @spec continue_with_issue_for_test(Issue.t(), ([String.t()] -> term())) ::
@@ -82,9 +83,10 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp codex_message_handler(recipient, issue) do
+  defp codex_message_handler(recipient, issue, context_key) do
     fn message ->
       send_codex_update(recipient, issue, message)
+      observe_context(context_key, recipient, issue, message)
     end
   end
 
@@ -129,6 +131,29 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp send_session_runtime_info(_recipient, _issue, _session), do: :ok
 
+  defp send_context_runtime_info(recipient, %Issue{id: issue_id}, %ContextManager{} = context)
+       when is_binary(issue_id) and is_pid(recipient) do
+    send(recipient, {:worker_runtime_info, issue_id, ContextManager.runtime_info(context)})
+    :ok
+  end
+
+  defp send_context_runtime_info(_recipient, _issue, _context), do: :ok
+
+  defp observe_context(context_key, recipient, issue, message) do
+    context = Process.get(context_key)
+    updated_context = ContextManager.observe(context, message)
+    Process.put(context_key, updated_context)
+    send_context_runtime_info(recipient, issue, updated_context)
+  end
+
+  defp transition_context(context_key, recipient, issue, transition) do
+    context = Process.get(context_key)
+    updated_context = transition.(context)
+    Process.put(context_key, updated_context)
+    send_context_runtime_info(recipient, issue, updated_context)
+    updated_context
+  end
+
   defp send_agent_blocked(recipient, %Issue{id: issue_id}, reason)
        when is_binary(issue_id) and is_pid(recipient) do
     send(recipient, {:agent_blocked, issue_id, reason})
@@ -144,8 +169,17 @@ defmodule SymphonyElixir.AgentRunner do
   defp configuration_blocker?(_reason), do: false
 
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
-    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+    settings = Config.settings!()
+    max_turns = Keyword.get(opts, :max_turns, settings.agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issues_by_ids/1)
+    context_key = {:symphony_context_manager, make_ref()}
+
+    context_config = %{
+      enabled: settings.context_management.enabled and settings.tracker.kind == "todoist",
+      checkpoint_threshold: settings.context_management.checkpoint_threshold
+    }
+
+    Process.put(context_key, ContextManager.new(context_config))
 
     with {:ok, session} <-
            AppServer.start_session(workspace,
@@ -153,46 +187,52 @@ defmodule SymphonyElixir.AgentRunner do
              execution_settings: issue.execution_settings
            ) do
       send_session_runtime_info(codex_update_recipient, issue, session)
+      send_context_runtime_info(codex_update_recipient, issue, Process.get(context_key))
+
+      run_state = %{
+        session: session,
+        workspace: workspace,
+        recipient: codex_update_recipient,
+        opts: opts,
+        issue_state_fetcher: issue_state_fetcher,
+        context_key: context_key,
+        max_turns: max_turns
+      }
 
       try do
-        do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
+        do_run_codex_turns(run_state, issue, 1, :normal)
       after
         AppServer.stop_session(session)
+        Process.delete(context_key)
       end
     end
   end
 
-  defp do_run_codex_turns(app_session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, turn_number, max_turns) do
-    prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
+  defp do_run_codex_turns(run_state, issue, turn_number, turn_kind) do
+    prompt =
+      build_turn_prompt(issue, run_state.opts, turn_number, run_state.max_turns, turn_kind)
 
     with {:ok, turn_session} <-
            AppServer.run_turn(
-             app_session,
+             run_state.session,
              prompt,
              issue,
-             on_message: codex_message_handler(codex_update_recipient, issue)
+             on_message: codex_message_handler(run_state.recipient, issue, run_state.context_key)
            ) do
-      Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+      Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{run_state.workspace} turn=#{turn_number}/#{run_state.max_turns}")
 
-      case continue_with_issue?(issue, issue_state_fetcher) do
-        {:continue, refreshed_issue} when turn_number < max_turns ->
-          Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
+      if turn_kind == :resume do
+        transition_context(
+          run_state.context_key,
+          run_state.recipient,
+          issue,
+          &ContextManager.resume_completed/1
+        )
+      end
 
-          do_run_codex_turns(
-            app_session,
-            workspace,
-            refreshed_issue,
-            codex_update_recipient,
-            opts,
-            issue_state_fetcher,
-            turn_number + 1,
-            max_turns
-          )
-
+      case continue_with_issue?(issue, run_state.issue_state_fetcher) do
         {:continue, refreshed_issue} ->
-          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
-
-          :ok
+          continue_after_turn(run_state, refreshed_issue, turn_number)
 
         {:done, _refreshed_issue} ->
           :ok
@@ -203,9 +243,122 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
+  defp continue_after_turn(run_state, issue, turn_number) do
+    context = Process.get(run_state.context_key)
 
-  defp build_turn_prompt(_issue, _opts, turn_number, max_turns) do
+    cond do
+      ContextManager.checkpoint_pending?(context) ->
+        with :ok <- run_checkpoint_cycle(run_state, issue) do
+          do_run_codex_turns(run_state, issue, turn_number + 1, :resume)
+        end
+
+      turn_number < run_state.max_turns ->
+        Logger.info("Continuing agent run for #{issue_context(issue)} after normal turn completion turn=#{turn_number}/#{run_state.max_turns}")
+
+        do_run_codex_turns(run_state, issue, turn_number + 1, :normal)
+
+      true ->
+        Logger.info("Reached agent.max_turns for #{issue_context(issue)} with issue still active; returning control to orchestrator")
+        :ok
+    end
+  end
+
+  defp run_checkpoint_cycle(run_state, issue) do
+    skill_path = checkpoint_skill_path(run_state.session, run_state.workspace)
+
+    with {:ok, previous_checkpoint} <- Tracker.latest_checkpoint_comment(issue),
+         _context <-
+           transition_context(
+             run_state.context_key,
+             run_state.recipient,
+             issue,
+             &ContextManager.checkpoint_started/1
+           ),
+         {:ok, _turn} <-
+           AppServer.run_turn(
+             run_state.session,
+             "Checkpoint before context compaction",
+             issue,
+             input: checkpoint_input(skill_path, issue.id),
+             on_message: codex_message_handler(run_state.recipient, issue, run_state.context_key)
+           ),
+         {:ok, checkpoint} <- Tracker.latest_checkpoint_comment(issue),
+         :ok <- verify_new_checkpoint(previous_checkpoint, checkpoint),
+         _context <- checkpoint_completed(run_state, issue),
+         :ok <-
+           AppServer.compact_thread(run_state.session,
+             on_message: codex_message_handler(run_state.recipient, issue, run_state.context_key)
+           ) do
+      transition_context(
+        run_state.context_key,
+        run_state.recipient,
+        issue,
+        &ContextManager.compaction_completed/1
+      )
+
+      :ok
+    end
+  end
+
+  defp checkpoint_completed(run_state, issue) do
+    transition_context(run_state.context_key, run_state.recipient, issue, fn context ->
+      ContextManager.checkpoint_completed(context, DateTime.utc_now())
+    end)
+  end
+
+  defp checkpoint_skill_path(%{worker_host: nil}, _workspace), do: @checkpoint_skill_path
+
+  defp checkpoint_skill_path(%{worker_host: worker_host}, workspace) when is_binary(worker_host),
+    do: Path.join(workspace, ".codex/skills/checkpoint/SKILL.md")
+
+  defp checkpoint_input(skill_path, issue_id) do
+    [
+      %{"type" => "skill", "name" => "checkpoint", "path" => skill_path},
+      %{
+        "type" => "text",
+        "text" =>
+          "Create the durable pre-compaction checkpoint for Todoist task #{issue_id}. " <>
+            "Follow the checkpoint skill exactly and ensure the new comment starts with [SYMPHONY_CHECKPOINT_V1]."
+      }
+    ]
+  end
+
+  defp verify_new_checkpoint(previous_checkpoint, %{"id" => checkpoint_id, "content" => content})
+       when is_binary(checkpoint_id) and is_binary(content) do
+    previous_id = previous_checkpoint && previous_checkpoint["id"]
+
+    if checkpoint_id != previous_id and checkpoint_marker?(content) do
+      :ok
+    else
+      {:error, :checkpoint_not_persisted}
+    end
+  end
+
+  defp verify_new_checkpoint(_previous_checkpoint, _checkpoint),
+    do: {:error, :checkpoint_not_persisted}
+
+  defp checkpoint_marker?(content) do
+    content
+    |> String.split(~r/\R/, parts: 2)
+    |> List.first()
+    |> Kernel.==("[SYMPHONY_CHECKPOINT_V1]")
+  end
+
+  defp build_turn_prompt(issue, opts, 1, _max_turns, :normal),
+    do: PromptBuilder.build_prompt(issue, opts)
+
+  defp build_turn_prompt(_issue, _opts, _turn_number, _max_turns, :resume) do
+    """
+    Read the latest Todoist comment for this task whose first line is
+    [SYMPHONY_CHECKPOINT_V1].
+
+    Treat it as the durable checkpoint from before context compaction. Reconcile it with the current
+    repository/worktree state and git status. Continue from the recorded next action. Do not redo
+    completed work unless the current workspace state contradicts the checkpoint.
+    """
+  end
+
+  defp build_turn_prompt(_issue, _opts, turn_number, max_turns, :normal) do
     """
     Continuation guidance:
 
