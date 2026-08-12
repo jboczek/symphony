@@ -1,7 +1,7 @@
 ---
 title: Task execution worktrees and automatic context management
 summary: Add Todoist task overrides, repository worktrees, Blocked workflow state, and durable checkpoint-compaction recovery.
-status: in_progress
+status: done
 ---
 
 # Task execution worktrees and automatic context management
@@ -50,68 +50,68 @@ to Todoist before compacting and resuming a thread whose active context reaches 
 
 ### Task metadata
 
-- [ ] No front matter preserves current behavior and the original description.
-- [ ] `repo` alone, and all three settings together, parse into one typed execution-settings value.
-- [ ] Human-readable description text after Symphony front matter remains available to the worker.
-- [ ] Malformed YAML, unknown/invalid settings, traversal, an invalid repository, model, or reasoning
+- [x] No front matter preserves current behavior and the original description.
+- [x] `repo` alone, and all three settings together, parse into one typed execution-settings value.
+- [x] Human-readable description text after Symphony front matter remains available to the worker.
+- [x] Malformed YAML, unknown/invalid settings, traversal, an invalid repository, model, or reasoning
   combination produce a concise Todoist comment and move the task to `Blocked` instead of being
   ignored or retried indefinitely.
-- [ ] Omitted model/thinking retain the configured or App Server default values.
+- [x] Omitted model/thinking retain the configured or App Server default values.
 
 ### Repository and workspace
 
-- [ ] A task repository resolves to the exact direct child of the configured repository root.
-- [ ] A repository-backed workspace is that task's Git worktree; Codex starts with the worktree as
+- [x] A task repository resolves to the exact direct child of the configured repository root.
+- [x] A repository-backed workspace is that task's Git worktree; Codex starts with the worktree as
   `cwd` and no per-task clone is performed.
-- [ ] Concurrent tasks for one source repository receive independent deterministic branches and
+- [x] Concurrent tasks for one source repository receive independent deterministic branches and
   worktrees based on the existing branch convention or `symphony/<task-identity>`.
-- [ ] Resume reuses the correct worktree by stable task identity even after a title rename.
-- [ ] A workspace associated with another repository fails safely.
-- [ ] Cleanup invokes the before-remove behavior, detaches only a Symphony-owned linked worktree,
+- [x] Resume reuses the correct worktree by stable task identity even after a title rename.
+- [x] A workspace associated with another repository fails safely.
+- [x] Cleanup invokes the before-remove behavior, detaches only a Symphony-owned linked worktree,
   tolerates stale worktree metadata, and never modifies/removes a primary working tree.
-- [ ] New workspace names contain source, stable task ID, and a lowercase safe title slug; whitespace,
+- [x] New workspace names contain source, stable task ID, and a lowercase safe title slug; whitespace,
   punctuation, Unicode, separators, traversal text, and long titles remain filesystem-safe.
-- [ ] Identical titles with different IDs remain distinct.
+- [x] Identical titles with different IDs remain distinct.
 
 ### Codex runtime and workflow state
 
-- [ ] Task model/reasoning overrides are sent on App Server `thread/start`/`turn/start`, with exact
+- [x] Task model/reasoning overrides are sent on App Server `thread/start`/`turn/start`, with exact
   values and no CLI subprocess routing or aliases.
-- [ ] `model/list` validates a requested model and supported reasoning effort and supplies observable
+- [x] `model/list` validates a requested model and supported reasoning effort and supplies observable
   effective defaults.
-- [ ] Todoist scope/state mappings and the structured tool include `Blocked`; configured active states
+- [x] Todoist scope/state mappings and the structured tool include `Blocked`; configured active states
   do not dispatch it.
-- [ ] A genuine blocker records what/why/action, moves to `Blocked`, and stops the worker; moving the
+- [x] A genuine blocker records what/why/action, moves to `Blocked`, and stops the worker; moving the
   task back to an active state permits dispatch again.
-- [ ] `HumanReview` remains the completed-work review gate and is not reused for blockers.
+- [x] `HumanReview` remains the completed-work review gate and is not reused for blockers.
 
 ### Context management and durable recovery
 
-- [ ] Configuration supports `context_management.enabled` (default `true`) and
+- [x] Configuration supports `context_management.enabled` (default `true`) and
   `context_management.checkpoint_threshold` (default `0.70`).
-- [ ] Current usage is `tokenUsage.last.totalTokens / tokenUsage.modelContextWindow`; below-threshold
+- [x] Current usage is `tokenUsage.last.totalTokens / tokenUsage.modelContextWindow`; below-threshold
   events do nothing and repeated above-threshold events schedule only one cycle.
-- [ ] A pending checkpoint waits for normal turn completion, then enters explicit checkpointing,
+- [x] A pending checkpoint waits for normal turn completion, then enters explicit checkpointing,
   compacting, and resuming states without normal work overlapping compaction.
-- [ ] `.codex/skills/checkpoint/SKILL.md` captures goal, progress, decisions, repository/branch,
+- [x] `.codex/skills/checkpoint/SKILL.md` captures goal, progress, decisions, repository/branch,
   changes, commits, verification, blockers, and exact next action in a new Todoist comment whose
   first line is `[SYMPHONY_CHECKPOINT_V1]`.
-- [ ] The checkpoint skill is passed as an App Server `skill` input, and a newly persisted matching
+- [x] The checkpoint skill is passed as an App Server `skill` input, and a newly persisted matching
   comment is verified before `thread/compact/start` is sent.
-- [ ] Checkpoint failure prevents compaction; compaction failure retains the checkpoint and surfaces
+- [x] Checkpoint failure prevents compaction; compaction failure retains the checkpoint and surfaces
   an explicit failure.
-- [ ] Successful compaction waits for the context-compaction lifecycle, then starts a turn in the
+- [x] Successful compaction waits for the context-compaction lifecycle, then starts a turn in the
   same thread instructing Codex to read the newest Todoist checkpoint, reconcile Git/worktree state,
   and continue the recorded next action.
-- [ ] After successful resume the single-flight guard resets so a later threshold crossing can
+- [x] After successful resume the single-flight guard resets so a later threshold crossing can
   schedule another cycle.
 
 ### Observability and compatibility
 
-- [ ] Worker/debug state exposes task identifier/state/title, repository, workspace, branch, thread
+- [x] Worker/debug state exposes task identifier/state/title, repository, workspace, branch, thread
   and turn/session IDs, model, reasoning effort, current context tokens, model window, usage percent,
   checkpoint status/time, and compaction state without secrets or JSONL parsing.
-- [ ] Existing workspace, scheduler, retry, tracker, App Server, and dashboard behavior stays green
+- [x] Existing workspace, scheduler, retry, tracker, App Server, and dashboard behavior stays green
   unless explicitly changed above.
 
 ## Implementation notes
@@ -128,14 +128,14 @@ to Todoist before compacting and resuming a thread whose active context reaches 
 
 ## Tasks
 
-- [ ] Add task metadata parser and repository resolver tests/implementation.
-- [ ] Add readable workspace discovery and Git worktree lifecycle tests/implementation.
-- [ ] Add model/reasoning validation and resolved runtime observability.
-- [ ] Add `Blocked` state mapping, automatic blocking behavior, and workflow tests/docs.
-- [ ] Add context state machine, checkpoint skill, App Server compaction/resume, and focused tests.
-- [ ] Extend dashboard/debug projection and documentation.
-- [ ] Run focused tests, format/spec checks, and `make all`; audit every criterion.
-- [ ] Mark this spec `done`, move it to `docs/specs/done/`, and make the lifecycle commit.
+- [x] Add task metadata parser and repository resolver tests/implementation.
+- [x] Add readable workspace discovery and Git worktree lifecycle tests/implementation.
+- [x] Add model/reasoning validation and resolved runtime observability.
+- [x] Add `Blocked` state mapping, automatic blocking behavior, and workflow tests/docs.
+- [x] Add context state machine, checkpoint skill, App Server compaction/resume, and focused tests.
+- [x] Extend dashboard/debug projection and documentation.
+- [x] Run focused tests, format/spec checks, and `make all`; audit every criterion.
+- [x] Mark this spec `done`, move it to `docs/specs/done/`, and make the lifecycle commit.
 
 ## Verification
 
@@ -143,3 +143,10 @@ to Todoist before compacting and resuming a thread whose active context reaches 
   tests passed with 0 failures.
 - Installed protocol probe: Codex CLI/App Server 0.147.0 returned model metadata, repo/user skill
   metadata, and accepted `thread/compact/start`, emitting a `contextCompaction` lifecycle item.
+- Focused final App Server verification: 23 tests passed with 0 failures, including explicit
+  checkpoint input, compaction lifecycle, and compaction response-error coverage.
+- Final `mise exec -- make all`: build and formatting passed; public-spec check and Credo reported no
+  issues; 347 tests passed with 0 failures and 6 skipped; enforced coverage was 100%; Dialyzer
+  reported 0 errors.
+- Dependency resolution reported security advisories in unchanged locked dependencies. Dependency
+  upgrades are outside this spec and no dependency or lockfile was modified.
