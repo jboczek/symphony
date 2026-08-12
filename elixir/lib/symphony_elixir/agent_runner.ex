@@ -9,6 +9,21 @@ defmodule SymphonyElixir.AgentRunner do
   alias SymphonyElixir.Tracker.Issue
 
   @type worker_host :: String.t() | nil
+  @configuration_blocker_tags [
+    :invalid_task_execution_settings,
+    :invalid_repository_name,
+    :repository_outside_root,
+    :repository_not_found,
+    :not_a_git_repository,
+    :repository_worktrees_require_local_worker,
+    :workspace_path_conflict,
+    :workspace_is_primary_repository,
+    :workspace_branch_mismatch,
+    :workspace_identity_mismatch,
+    :workspace_repository_mismatch,
+    :workspace_outside_root,
+    :invalid_workspace_cwd
+  ]
 
   @doc false
   @spec continue_with_issue_for_test(Issue.t(), ([String.t()] -> term())) ::
@@ -31,7 +46,13 @@ defmodule SymphonyElixir.AgentRunner do
 
       {:error, reason} ->
         Logger.error("Agent run failed for #{issue_context(issue)}: #{inspect(reason)}")
-        raise RuntimeError, "Agent run failed for #{issue_context(issue)}: #{inspect(reason)}"
+
+        if configuration_blocker?(reason) do
+          send_agent_blocked(codex_update_recipient, issue, reason)
+          :ok
+        else
+          raise RuntimeError, "Agent run failed for #{issue_context(issue)}: #{inspect(reason)}"
+        end
     end
   end
 
@@ -107,6 +128,20 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp send_session_runtime_info(_recipient, _issue, _session), do: :ok
+
+  defp send_agent_blocked(recipient, %Issue{id: issue_id}, reason)
+       when is_binary(issue_id) and is_pid(recipient) do
+    send(recipient, {:agent_blocked, issue_id, reason})
+    :ok
+  end
+
+  defp send_agent_blocked(_recipient, _issue, _reason), do: :ok
+
+  defp configuration_blocker?(reason) when is_tuple(reason) and tuple_size(reason) > 0,
+    do: elem(reason, 0) in @configuration_blocker_tags
+
+  defp configuration_blocker?(:git_not_found), do: true
+  defp configuration_blocker?(_reason), do: false
 
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)

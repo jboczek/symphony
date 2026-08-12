@@ -9,7 +9,7 @@ defmodule SymphonyElixir.Todoist.CLITest do
     "isArchived" => false,
     "isDeleted" => false
   }
-  @section_names ["Backlog", "Todo", "InProgress", "HumanReview", "Rework", "Merging", "Done"]
+  @section_names ["Backlog", "Todo", "InProgress", "Blocked", "HumanReview", "Rework", "Merging", "Done"]
 
   setup do
     CLI.clear_scope_for_test()
@@ -29,6 +29,7 @@ defmodule SymphonyElixir.Todoist.CLITest do
     assert scope.project_id == "project-1"
     assert scope.project_name == "_agents"
     assert scope.sections_by_name["Todo"].id == "section-todo"
+    assert scope.sections_by_name["Blocked"].id == "section-blocked"
     assert scope.sections_by_name["HumanReview"].project_id == "project-1"
 
     assert_received {:td_args, ["--no-spinner", "auth", "status"]}

@@ -177,6 +177,20 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  def handle_info({:agent_blocked, issue_id, reason}, %{running: running} = state)
+      when is_binary(issue_id) do
+    case Map.get(running, issue_id) do
+      nil ->
+        {:noreply, state}
+
+      running_entry ->
+        error = blocker_reason_text(reason)
+        Logger.warning("Agent configuration blocked issue_id=#{issue_id}: #{error}")
+        notify_dashboard()
+        {:noreply, block_issue_from_entry(state, issue_id, running_entry, error)}
+    end
+  end
+
   def handle_info(
         {:codex_worker_update, issue_id, %{event: _, timestamp: _} = update},
         %{running: running} = state
@@ -772,6 +786,9 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp block_issue_from_entry(%State{} = state, issue_id, running_entry, error) do
+    issue = Map.get(running_entry, :issue)
+    persist_tracker_block(issue, error)
+
     blocked_entry = %{
       issue_id: issue_id,
       identifier: Map.get(running_entry, :identifier, issue_id),
@@ -924,7 +941,13 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case refresh_issue_for_dispatch(issue) do
       {:ok, %Issue{} = refreshed_issue} ->
-        do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+        case Workspace.validate_issue_configuration(refreshed_issue) do
+          :ok ->
+            do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+
+          {:error, reason} ->
+            block_issue_before_dispatch(state, refreshed_issue, reason)
+        end
 
       {:skip, _reason} ->
         state
@@ -933,6 +956,59 @@ defmodule SymphonyElixir.Orchestrator do
         state
     end
   end
+
+  defp block_issue_before_dispatch(state, issue, reason) do
+    error = blocker_reason_text(reason)
+    Logger.warning("Task configuration blocked #{issue_context(issue)}: #{error}")
+
+    block_issue_from_entry(
+      state,
+      issue.id,
+      %{identifier: issue.identifier, issue: issue},
+      error
+    )
+  end
+
+  defp persist_tracker_block(%Issue{} = issue, error) when is_binary(error) do
+    comment =
+      "Symphony cannot continue: #{error}.\n" <>
+        "Action required: correct the task configuration or provide the missing input, then move the task to an active section."
+
+    case Tracker.block_issue(issue, comment) do
+      :ok -> :ok
+      {:error, reason} -> Logger.error("Failed to persist Blocked state for #{issue_context(issue)}: #{inspect(reason)}")
+    end
+  end
+
+  defp persist_tracker_block(_issue, _error), do: :ok
+
+  defp blocker_reason_text({:invalid_task_execution_settings, :malformed_yaml}),
+    do: "the task's Symphony front matter contains malformed YAML"
+
+  defp blocker_reason_text({:invalid_task_execution_settings, :unterminated_front_matter}),
+    do: "the task's Symphony front matter is missing its closing delimiter"
+
+  defp blocker_reason_text({:invalid_task_execution_settings, {:unknown_model, model}}),
+    do: "the requested Codex model #{inspect(model)} is unavailable"
+
+  defp blocker_reason_text({:invalid_task_execution_settings, {:unsupported_reasoning_effort, model, reasoning_effort}}) do
+    "reasoning effort #{inspect(reasoning_effort)} is unavailable for model #{inspect(model)}"
+  end
+
+  defp blocker_reason_text({:repository_not_found, repository}),
+    do: "repository #{inspect(repository)} does not exist under the configured repository root"
+
+  defp blocker_reason_text({:not_a_git_repository, repository}),
+    do: "repository #{inspect(repository)} is not a Git repository"
+
+  defp blocker_reason_text({:invalid_repository_name, repository}),
+    do: "repository name #{inspect(repository)} is invalid"
+
+  defp blocker_reason_text({:repository_worktrees_require_local_worker, worker_host}),
+    do: "repository worktrees require a local worker, but #{inspect(worker_host)} was selected"
+
+  defp blocker_reason_text(reason) when is_binary(reason), do: reason
+  defp blocker_reason_text(reason), do: inspect(reason, limit: 20, printable_limit: 300)
 
   defp refresh_issue_for_dispatch(issue) do
     case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issues_by_ids/1, terminal_state_set()) do
@@ -963,7 +1039,10 @@ defmodule SymphonyElixir.Orchestrator do
         state
 
       worker_host ->
-        spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+        case Workspace.validate_issue_configuration(issue, worker_host) do
+          :ok -> spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+          {:error, reason} -> block_issue_before_dispatch(state, issue, reason)
+        end
     end
   end
 

@@ -18,6 +18,26 @@ defmodule SymphonyElixir.Workspace do
 
   def runtime_info(_issue, _workspace), do: %{repository: nil, branch: nil}
 
+  @spec validate_issue_configuration(map(), worker_host()) :: :ok | {:error, term()}
+  def validate_issue_configuration(issue, worker_host \\ nil) do
+    case requested_repository(issue) do
+      {:ok, nil} ->
+        :ok
+
+      {:ok, repository_name} when is_nil(worker_host) ->
+        with {:ok, _repository} <-
+               RepositoryResolver.resolve(repository_name, Config.local_repository_root()) do
+          :ok
+        end
+
+      {:ok, _repository_name} ->
+        {:error, {:repository_worktrees_require_local_worker, worker_host}}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   @spec create_for_issue(map() | String.t() | nil, worker_host()) ::
           {:ok, Path.t()} | {:error, term()}
   def create_for_issue(issue_or_identifier, worker_host \\ nil) do

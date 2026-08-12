@@ -10,7 +10,16 @@ defmodule SymphonyElixir.Todoist.CLI do
   @default_timeout_ms 30_000
   @max_diagnostic_bytes 1_000
   @scope_key {__MODULE__, :scope}
-  @required_sections ["Backlog", "Todo", "InProgress", "HumanReview", "Rework", "Merging", "Done"]
+  @required_sections [
+    "Backlog",
+    "Todo",
+    "InProgress",
+    "Blocked",
+    "HumanReview",
+    "Rework",
+    "Merging",
+    "Done"
+  ]
 
   @type section :: %{id: String.t(), name: String.t(), project_id: String.t()}
   @type scope :: %{
