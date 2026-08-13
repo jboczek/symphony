@@ -58,7 +58,7 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         repository_root: repository_root,
-        hook_after_create: "touch hook-must-not-run"
+        hook_after_create: todoist_after_create_hook()
       )
 
       assert {:ok, first_workspace} = Workspace.create_for_issue(first)
@@ -67,7 +67,8 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
       assert first_workspace != second_workspace
       assert File.regular?(Path.join(first_workspace, ".git"))
       assert File.regular?(Path.join(second_workspace, ".git"))
-      refute File.exists?(Path.join(first_workspace, "hook-must-not-run"))
+      assert File.regular?(Path.join(first_workspace, ".codex/skills/checkpoint/SKILL.md"))
+      assert git(first_workspace, ["status", "--short", "--untracked-files=all"]) == ""
       assert File.read!(Path.join(first_workspace, "README.md")) == "source\n"
 
       assert git(first_workspace, ["branch", "--show-current"]) == "symphony/todoist-101"
@@ -85,6 +86,32 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
     after
       Workspace.remove_issue_workspaces(first)
       Workspace.remove_issue_workspaces(second)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "failed after_create removes a newly created Git worktree" do
+    test_root = tmp_path("worktree-hook-failure")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    source = create_git_repository(repository_root, "example.repo")
+    task = issue("111", "Hook failure", "example.repo")
+    workspace = Path.join(workspace_root, Workspace.workspace_key(task))
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root,
+        hook_after_create: "exit 17"
+      )
+
+      assert {:error, {:workspace_hook_failed, "after_create", 17, _output}} =
+               Workspace.create_for_issue(task)
+
+      refute File.exists?(workspace)
+      refute git(source, ["worktree", "list", "--porcelain"]) =~ workspace
+    after
+      Workspace.remove_issue_workspaces(task)
       File.rm_rf(test_root)
     end
   end
@@ -201,6 +228,12 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
   defp git(repository, args) do
     {output, 0} = System.cmd("git", ["-C", repository | args], stderr_to_stdout: true)
     String.trim(output)
+  end
+
+  defp todoist_after_create_hook do
+    workflow_path = Path.expand("../../WORKFLOW.todoist.md", __DIR__)
+    {:ok, %{config: config}} = Workflow.load(workflow_path)
+    get_in(config, ["hooks", "after_create"])
   end
 
   defp tmp_path(name) do

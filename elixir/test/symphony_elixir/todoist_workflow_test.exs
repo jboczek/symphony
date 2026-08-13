@@ -20,6 +20,9 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
     assert settings.codex.reasoning_effort == "xhigh"
     assert settings.codex.approval_policy == "never"
     assert settings.codex.thread_sandbox == "workspace-write"
+    assert settings.hooks.after_create =~ "SYMPHONY_CODEX_DIR"
+    assert settings.hooks.after_create =~ "cp -R"
+    refute settings.hooks.after_create =~ "git clone"
 
     assert settings.codex.turn_sandbox_policy == %{
              "type" => "workspaceWrite",

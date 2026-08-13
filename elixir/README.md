@@ -185,10 +185,18 @@ Notes:
   Server context (`tokenUsage.last.totalTokens / modelContextWindow`), not lifetime token totals.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
-- Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
-  `git clone ... .` there, along with any other setup commands you need.
-- If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
-  the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
+- Use `hooks.after_create` to bootstrap a newly created workspace. It runs after a configured Git
+  worktree is prepared as well as after a plain directory is created; it does not run again when an
+  existing workspace is reused.
+- For a task selected with `symphony.repo`, the repository must already exist under
+  `repositories.root`; the workspace is created with `git worktree`, so `after_create` should run
+  setup commands and must not clone the repository into `.`.
+- The Todoist profile exposes `SYMPHONY_CODEX_DIR` to local hooks. Its `after_create` copies the
+  repository-local `.codex/` skills into the workspace and excludes that copy from the worktree's
+  Git status. A Todoist task without `symphony.repo` still gets a plain workspace, with the same
+  hook available for bootstrap/setup.
+- If a hook needs `mise exec`, trust the repo config and fetch the project dependencies in
+  `hooks.after_create` before invoking `mise` later from other hooks.
 - For the Linear adapter, `tracker.provider.api_key` reads from `LINEAR_API_KEY` when unset or
   when value is `$LINEAR_API_KEY`. The legacy flat `tracker.api_key` alias behaves the same way.
 - Do not put a literal tracker token in a repo-owned `WORKFLOW.md` if Codex can read that
