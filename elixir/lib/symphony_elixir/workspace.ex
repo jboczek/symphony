@@ -7,6 +7,7 @@ defmodule SymphonyElixir.Workspace do
   alias SymphonyElixir.{Config, GitWorktree, PathSafety, RepositoryResolver, SSH, TaskExecutionSettings}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
+  @codex_directory Path.expand("../../../.codex", __DIR__)
 
   @type worker_host :: String.t() | nil
 
@@ -59,7 +60,7 @@ defmodule SymphonyElixir.Workspace do
             {:ok, workspace}
 
           {:error, _reason} = error ->
-            cleanup_failed_new_workspace(workspace, created?, worker_host)
+            cleanup_failed_new_workspace(workspace, created?, workspace_type, worker_host)
             error
         end
       end
@@ -516,7 +517,7 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp maybe_run_after_create_hook(workspace, issue_context, created?, :directory, worker_host) do
+  defp maybe_run_after_create_hook(workspace, issue_context, created?, _workspace_type, worker_host) do
     hooks = Config.settings!().hooks
 
     case created? do
@@ -534,12 +535,22 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp maybe_run_after_create_hook(_workspace, _issue_context, _created?, :git_worktree, _worker_host),
-    do: :ok
+  defp cleanup_failed_new_workspace(_workspace, false, _workspace_type, _worker_host), do: :ok
 
-  defp cleanup_failed_new_workspace(_workspace, false, _worker_host), do: :ok
+  defp cleanup_failed_new_workspace(workspace, true, :git_worktree, nil) do
+    case GitWorktree.remove_recorded(workspace) do
+      {:ok, _removed} ->
+        :ok
 
-  defp cleanup_failed_new_workspace(workspace, true, nil) do
+      :not_owned ->
+        Logger.warning("Failed to remove newly created Git worktree path=#{workspace} reason=not_owned")
+
+      {:error, reason, path} ->
+        Logger.warning("Failed to remove newly created Git worktree path=#{path} reason=#{inspect(reason)}")
+    end
+  end
+
+  defp cleanup_failed_new_workspace(workspace, true, :directory, nil) do
     case File.rm_rf(workspace) do
       {:ok, _removed} ->
         :ok
@@ -549,7 +560,8 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp cleanup_failed_new_workspace(workspace, true, worker_host) when is_binary(worker_host) do
+  defp cleanup_failed_new_workspace(workspace, true, _workspace_type, worker_host)
+       when is_binary(worker_host) do
     script = [remote_shell_assign("workspace", workspace), "rm -rf \"$workspace\""] |> Enum.join("\n")
 
     case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
@@ -634,7 +646,11 @@ defmodule SymphonyElixir.Workspace do
 
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", command], cd: workspace, stderr_to_stdout: true)
+        System.cmd("sh", ["-lc", command],
+          cd: workspace,
+          env: [{"SYMPHONY_CODEX_DIR", @codex_directory}],
+          stderr_to_stdout: true
+        )
       end)
 
     case Task.yield(task, timeout_ms) do
