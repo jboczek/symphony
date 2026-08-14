@@ -272,28 +272,49 @@ pre,
 
 .metric-token-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.7rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   margin-top: 0.55rem;
 }
 
 .metric-token-grid > div {
   display: grid;
-  gap: 0.2rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: baseline;
   min-width: 0;
+  padding: 0.34rem 0;
+  border-top: 1px solid var(--line);
 }
 
 .metric-token-label {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 600;
-  white-space: nowrap;
 }
 
 .metric-token-value {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: -0.03em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.metric-token-total {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+}
+
+.metric-token-total > span:last-child {
+  color: var(--ink);
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .section-card {
@@ -335,29 +356,31 @@ pre,
 
 .data-table-running {
   table-layout: fixed;
-  min-width: 980px;
+  min-width: 1180px;
 }
 
 .data-table-completed {
-  min-width: 980px;
+  min-width: 1180px;
   table-layout: fixed;
 }
 
 .data-table th {
-  padding: 0 0.5rem 0.75rem 0;
+  padding: 0 0.75rem 0.75rem 0;
   text-align: left;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
 }
 
 .data-table td {
-  padding: 0.9rem 0.5rem 0.9rem 0;
+  padding: 0.9rem 0.75rem 0.9rem 0;
   border-top: 1px solid var(--line);
   vertical-align: top;
   font-size: 0.94rem;
+  overflow-wrap: anywhere;
 }
 
 .issue-stack,
@@ -373,16 +396,14 @@ pre,
   font-weight: 500;
   line-height: 1.45;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .event-meta {
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .state-badge {
@@ -426,6 +447,7 @@ pre,
 .issue-id {
   font-weight: 600;
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
 }
 
 .issue-id-link {

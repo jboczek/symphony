@@ -113,7 +113,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 <span class="metric-token-value"><%= format_int(@payload.codex_totals.output_tokens) %></span>
               </div>
             </div>
-            <p class="metric-detail numeric">Total <%= format_int(@payload.codex_totals.total_tokens) %></p>
+            <p class="metric-detail metric-token-total numeric">
+              <span>Total</span>
+              <span><%= format_int(@payload.codex_totals.total_tokens) %></span>
+            </p>
           </article>
 
           <article class="metric-card">
@@ -148,12 +151,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <div class="table-wrap">
               <table class="data-table data-table-running">
                 <colgroup>
-                  <col style="width: 12rem;" />
-                  <col style="width: 8rem;" />
-                  <col style="width: 7.5rem;" />
-                  <col style="width: 8.5rem;" />
-                  <col />
+                  <col style="width: 16rem;" />
+                  <col style="width: 9rem;" />
+                  <col style="width: 10.5rem;" />
                   <col style="width: 10rem;" />
+                  <col />
+                  <col style="width: 13rem;" />
                 </colgroup>
                 <thead>
                   <tr>
@@ -368,12 +371,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <div class="table-wrap">
               <table class="data-table data-table-completed">
                 <colgroup>
+                  <col style="width: 16rem;" />
+                  <col style="width: 9rem;" />
+                  <col style="width: 10.5rem;" />
                   <col style="width: 12rem;" />
-                  <col style="width: 8rem;" />
-                  <col style="width: 8.5rem;" />
                   <col style="width: 10rem;" />
-                  <col style="width: 8.5rem;" />
-                  <col />
+                  <col style="width: 14rem;" />
                 </colgroup>
                 <thead>
                   <tr>
