@@ -11,7 +11,8 @@ description:
 ## Prerequisites
 
 - The current branch matches `feature/<task-id>-<short-slug>`.
-   - Derive `<task-id>` from the user's request, task description, or linked
+   - For a Symphony Todoist task, use `symphony.task_id` from the task front matter.
+   - Otherwise derive `<task-id>` from the user's request, task description, or linked
       task; ask the user for it when unavailable.
    - Derive `<short-slug>` from the requested changes: lowercase, hyphenated,
       descriptive, and at most 50 characters.
