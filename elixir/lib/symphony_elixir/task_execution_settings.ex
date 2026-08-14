@@ -40,21 +40,58 @@ defmodule SymphonyElixir.TaskExecutionSettings do
   def valid_repository_name?(_name), do: false
 
   defp split_front_matter(description) do
-    lines = String.split(description, ~r/\R/, trim: false)
+    lines = String.split(description, ~r/\R/u, trim: false)
 
     case lines do
       ["---" | tail] ->
-        {front_matter, rest} = Enum.split_while(tail, &(&1 != "---"))
+        split_unfenced_front_matter(tail)
 
-        case rest do
-          ["---" | body] -> {:ok, Enum.join(front_matter, "\n"), Enum.join(body, "\n")}
-          _ -> {:error, :unterminated_front_matter}
+      [opening_fence, "---" | tail] ->
+        if code_fence?(opening_fence) do
+          split_fenced_front_matter(tail)
+        else
+          :none
         end
 
       _ ->
         :none
     end
   end
+
+  defp split_fenced_front_matter(lines) do
+    case split_yaml_front_matter(lines) do
+      {:ok, yaml, [closing_fence | body]} ->
+        if code_fence?(closing_fence) do
+          {:ok, yaml, Enum.join(body, "\n")}
+        else
+          {:error, :unterminated_front_matter}
+        end
+
+      {:ok, _yaml, []} ->
+        {:error, :unterminated_front_matter}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp split_unfenced_front_matter(lines) do
+    case split_yaml_front_matter(lines) do
+      {:ok, yaml, body} -> {:ok, yaml, Enum.join(body, "\n")}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp split_yaml_front_matter(lines) do
+    {front_matter, rest} = Enum.split_while(lines, &(&1 != "---"))
+
+    case rest do
+      ["---" | body] -> {:ok, Enum.join(front_matter, "\n"), body}
+      _ -> {:error, :unterminated_front_matter}
+    end
+  end
+
+  defp code_fence?(line), do: String.trim(line) in ["```", "```yaml", "```yml"]
 
   defp parse_front_matter(yaml, body, original_description) do
     case YamlElixir.read_from_string(yaml) do

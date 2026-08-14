@@ -339,7 +339,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp checkpoint_marker?(content) do
     content
-    |> String.split(~r/\R/, parts: 2)
+    |> String.split(~r/\R/u, parts: 2)
     |> List.first()
     |> Kernel.==("[SYMPHONY_CHECKPOINT_V1]")
   end
