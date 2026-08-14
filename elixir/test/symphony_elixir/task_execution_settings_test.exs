@@ -47,12 +47,56 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
             }, "Ship it."} = TaskExecutionSettings.parse(description)
   end
 
+  test "parses exact settings inside a Markdown code fence" do
+    description = """
+    ```
+    ---
+    symphony:
+      repo: cse.tools.prompts
+      model: gpt-5.6-sol
+      thinking: high
+    ---
+    ```
+
+    Human task description.
+    """
+
+    assert {:ok,
+            %TaskExecutionSettings{
+              repo: "cse.tools.prompts",
+              model: "gpt-5.6-sol",
+              thinking: "high"
+            }, "Human task description."} = TaskExecutionSettings.parse(description)
+  end
+
+  test "preserves UTF-8 task text after parsing fenced settings" do
+    description = """
+    ```
+    ---
+    symphony:
+      model: gpt-5.6-sol
+    ---
+    ```
+
+    Proces wypełniający tabelę dla konta książkowo.
+    """
+
+    assert {:ok, %TaskExecutionSettings{model: "gpt-5.6-sol"}, body} =
+             TaskExecutionSettings.parse(description)
+
+    assert body == "Proces wypełniający tabelę dla konta książkowo."
+    assert String.valid?(body)
+  end
+
   test "rejects malformed or unterminated front matter" do
     assert {:error, {:invalid_task_execution_settings, :malformed_yaml}} =
              TaskExecutionSettings.parse("---\nsymphony: [\n---\nTask")
 
     assert {:error, {:invalid_task_execution_settings, :unterminated_front_matter}} =
              TaskExecutionSettings.parse("---\nsymphony:\n  repo: example")
+
+    assert {:error, {:invalid_task_execution_settings, :unterminated_front_matter}} =
+             TaskExecutionSettings.parse("```\n---\nsymphony:\n  repo: example\n---\nTask")
   end
 
   test "rejects invalid shapes, unknown keys, blank values, and traversal repositories" do

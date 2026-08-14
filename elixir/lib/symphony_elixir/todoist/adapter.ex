@@ -228,7 +228,7 @@ defmodule SymphonyElixir.Todoist.Adapter do
 
   defp checkpoint_comment?(%{"content" => content}) when is_binary(content) do
     content
-    |> String.split(~r/\R/, parts: 2)
+    |> String.split(~r/\R/u, parts: 2)
     |> List.first()
     |> Kernel.==(@checkpoint_comment_marker)
   end
