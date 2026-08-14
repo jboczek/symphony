@@ -85,6 +85,16 @@ defmodule SymphonyElixir.GitWorktree do
 
   def linked_worktree?(_workspace), do: false
 
+  @spec augment_turn_sandbox_policy(map(), Path.t()) :: {:ok, map()} | {:error, term()}
+  def augment_turn_sandbox_policy(%{"type" => "workspaceWrite"} = policy, workspace)
+      when is_binary(workspace) do
+    with {:ok, writable_roots} <- owned_worktree_writable_roots(workspace) do
+      {:ok, append_writable_roots(policy, writable_roots)}
+    end
+  end
+
+  def augment_turn_sandbox_policy(policy, _workspace) when is_map(policy), do: {:ok, policy}
+
   defp ensure_linked_worktree(repository, workspace, branch) do
     cond do
       File.dir?(workspace) ->
@@ -239,6 +249,37 @@ defmodule SymphonyElixir.GitWorktree do
         {:ok, _output} -> :ok
         {:error, status, output} -> {:error, {:git_worktree_remove_failed, status, bounded(output)}}
       end
+    end
+  end
+
+  defp owned_worktree_writable_roots(workspace) do
+    with {:ok, canonical_workspace} <- PathSafety.canonicalize(workspace),
+         {:ok, metadata} <- metadata_for_workspace(canonical_workspace) do
+      writable_roots_for_metadata(metadata, canonical_workspace)
+    end
+  end
+
+  defp writable_roots_for_metadata(nil, _workspace), do: {:ok, []}
+
+  defp writable_roots_for_metadata(%{repository: repository} = metadata, workspace) do
+    with {:ok, canonical_repository} <- PathSafety.canonicalize(repository),
+         :ok <- validate_metadata(metadata, canonical_repository, workspace),
+         :ok <- validate_workspace_location(canonical_repository, workspace),
+         :ok <- verify_repository_association(canonical_repository, workspace),
+         {:ok, common_dir} <- git_common_dir(workspace) do
+      {:ok, [workspace, common_dir]}
+    end
+  end
+
+  defp append_writable_roots(policy, []), do: policy
+
+  defp append_writable_roots(policy, writable_roots) do
+    case Map.get(policy, "writableRoots", []) do
+      configured_roots when is_list(configured_roots) ->
+        Map.put(policy, "writableRoots", Enum.uniq(configured_roots ++ writable_roots))
+
+      _invalid_roots ->
+        policy
     end
   end
 

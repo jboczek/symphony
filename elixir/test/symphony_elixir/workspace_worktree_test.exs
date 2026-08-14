@@ -90,6 +90,63 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
     end
   end
 
+  test "owned linked worktrees make shared Git metadata writable for Codex turns" do
+    test_root = tmp_path("worktree-sandbox")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    extra_root = Path.join(test_root, "cache")
+    codex_binary = Path.join(test_root, "fake-codex")
+    source = create_git_repository(repository_root, "example.repo")
+    task = issue("103", "Commit from sandbox", "example.repo")
+
+    try do
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r _line; do
+        count=$((count + 1))
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) ;;
+          3) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-worktree"}}}' ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root,
+        codex_command: "#{codex_binary} app-server",
+        codex_turn_sandbox_policy: %{
+          type: "workspaceWrite",
+          writableRoots: [extra_root],
+          networkAccess: true
+        }
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue(task)
+      assert {:ok, session} = AppServer.start_session(workspace)
+
+      assert {:ok, common_git_dir} =
+               SymphonyElixir.PathSafety.canonicalize(Path.join(source, ".git"))
+
+      try do
+        assert session.turn_sandbox_policy == %{
+                 "type" => "workspaceWrite",
+                 "writableRoots" => [extra_root, workspace, common_git_dir],
+                 "networkAccess" => true
+               }
+      after
+        AppServer.stop_session(session)
+      end
+    after
+      Workspace.remove_issue_workspaces(task)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "failed after_create removes a newly created Git worktree" do
     test_root = tmp_path("worktree-hook-failure")
     repository_root = Path.join(test_root, "repositories")

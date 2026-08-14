@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH, TaskExecutionSettings}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, GitWorktree, PathSafety, SSH, TaskExecutionSettings}
 
   @initialize_id 1
   @thread_start_id 2
@@ -354,7 +354,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp session_policies(workspace, nil) do
-    Config.codex_runtime_settings(workspace)
+    with {:ok, policies} <- Config.codex_runtime_settings(workspace),
+         {:ok, turn_sandbox_policy} <-
+           GitWorktree.augment_turn_sandbox_policy(policies.turn_sandbox_policy, workspace) do
+      {:ok, %{policies | turn_sandbox_policy: turn_sandbox_policy}}
+    end
   end
 
   defp session_policies(workspace, worker_host) when is_binary(worker_host) do
