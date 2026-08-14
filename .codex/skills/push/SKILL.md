@@ -7,15 +7,12 @@ description:
 
 # Push
 
-## Prerequisites
-
-- `gh` CLI is installed and available in `PATH`.
-- `gh auth status` succeeds for GitHub operations in this repo.
-
 ## Goals
 
 - Push current branch changes to `origin` safely.
-- Create a PR if none exists for the branch, otherwise update the existing PR.
+- Inspect the current branch's active PR with `git prget`.
+- Create a missing PR with `git prdesc`, or refresh an active PR's description
+  with `git prupdate`.
 - Keep branch history clean when remote has moved.
 
 ## Related Skills
@@ -37,32 +34,32 @@ description:
      the configured remote, stop and surface the exact error instead of
      rewriting remotes or switching protocols as a workaround.
 
-5. Ensure a PR exists for the branch:
-   - If no PR exists, create one.
-   - If a PR exists and is open, update it.
-   - If branch is tied to a closed/merged PR, create a new branch + PR.
-   - Write a proper PR title that clearly describes the change outcome
-   - For branch updates, explicitly reconsider whether current PR title still
-     matches the latest scope; update it if it no longer does.
-6. Write/update PR body explicitly using `.github/pull_request_template.md`:
+5. Inspect the current branch's active PR with `git prget`:
+   - If it reports `No active PR found`, create one with `git prdesc`.
+   - If it returns the active PR JSON, refresh its description with
+     `git prupdate`.
+   - Stop on any other `git prget` failure; do not treat authentication,
+     permission, or service errors as a missing PR.
+   - Give a new PR a title that describes its total scope. `git prupdate`
+     changes only the description, so stop if the current title is no longer
+     accurate.
+6. Write/update PR body explicitly using `./references/pull_request_template.md`:
    - Fill every section with concrete content for this change.
    - Replace all placeholder comments (`<!-- ... -->`).
    - Keep bullets/checkboxes where template expects them.
-   - If PR already exists, refresh body content so it reflects the total PR
-     scope (all intended work on the branch), not just the newest commits,
-     including newly added work, removed work, or changed approach.
+   - Pass the completed body inline to `git prdesc` when creating a PR, or to
+     `git prupdate` when refreshing an active PR. It must reflect the total PR
+     scope, including newly added work, removed work, or changed approach.
    - Do not reuse stale description text from earlier iterations.
 7. Validate PR body with `mix pr_body.check` and fix all reported issues.
-8. Reply with the PR URL from `gh pr view`.
+8. Reply with the URL printed by `git prdesc` for a new PR, or with the active
+   PR details from `git prget` after an update. Add the url as a task comment.
 
 ## Commands
 
 ```sh
 # Identify branch
 branch=$(git branch --show-current)
-
-# Minimal validation gate
-make -C elixir all
 
 # Initial push: respect the current origin remote.
 git push -u origin HEAD
@@ -77,35 +74,26 @@ git push -u origin HEAD
 # Only if history was rewritten locally:
 git push --force-with-lease origin HEAD
 
-# Ensure a PR exists (create only if missing)
-pr_state=$(gh pr view --json state -q .state 2>/dev/null || true)
-if [ "$pr_state" = "MERGED" ] || [ "$pr_state" = "CLOSED" ]; then
-  echo "Current branch is tied to a closed PR; create a new branch + PR." >&2
+# Inspect the active PR before deciding whether to create or update it.
+# `git prget` emits JSON for an active PR and a specific message when none exists.
+pr_title="<clear PR title written for this change>"
+if pr_details=$(git prget 2>&1); then
+  # Active PR: `git prupdate` preserves its title and reads the body from stdin.
+  git prupdate <<'EOF'
+<completed PR body with every template section filled in>
+EOF
+elif [ "$pr_details" = "No active PR found for branch: $branch" ]; then
+  # No active PR: the configured alias creates it and prints its web URL.
+  git prdesc "$pr_title" <<'EOF'
+<completed PR body with every template section filled in>
+EOF
+else
+  printf '%s\n' "$pr_details" >&2
   exit 1
 fi
 
-# Write a clear, human-friendly title that summarizes the shipped change.
-pr_title="<clear PR title written for this change>"
-if [ -z "$pr_state" ]; then
-  gh pr create --title "$pr_title"
-else
-  # Reconsider title on every branch update; edit if scope shifted.
-  gh pr edit --title "$pr_title"
-fi
-
-# Write/edit PR body to match .github/pull_request_template.md before validation.
-# Example workflow:
-# 1) open the template and draft body content for this PR
-# 2) gh pr edit --body-file /tmp/pr_body.md
-# 3) for branch updates, re-check that title/body still match current diff
-
-tmp_pr_body=$(mktemp)
-gh pr view --json body -q .body > "$tmp_pr_body"
-(cd elixir && mix pr_body.check --file "$tmp_pr_body")
-rm -f "$tmp_pr_body"
-
-# Show PR URL for the reply
-gh pr view --json url -q .url
+# Show the active PR record after creation or update.
+git prget
 ```
 
 ## Notes
@@ -115,3 +103,5 @@ gh pr view --json url -q .url
   - Use the `pull` skill for non-fast-forward or stale-branch issues.
   - Surface auth, permissions, or workflow restrictions directly instead of
     changing remotes or protocols.
+- The configured PR aliases target Azure DevOps and operate on the current
+  branch. Do not substitute `gh pr` or direct `az repos pr` commands.
