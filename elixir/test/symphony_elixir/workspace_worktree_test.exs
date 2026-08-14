@@ -90,6 +90,33 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
     end
   end
 
+  test "task IDs create and resume feature branches" do
+    test_root = tmp_path("task-id-worktree")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    source = create_git_repository(repository_root, "example.repo")
+    task = issue("104", "Add basket attribution", "example.repo", "135550")
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue(task)
+      assert git(workspace, ["branch", "--show-current"]) == "feature/135550-add-basket-attribution"
+
+      renamed = %{task | title: "Add basket attribution to promotions"}
+      assert {:ok, ^workspace} = Workspace.create_for_issue(renamed)
+      assert git(workspace, ["branch", "--show-current"]) == "feature/135550-add-basket-attribution"
+      assert Workspace.runtime_info(renamed, workspace).branch == "feature/135550-add-basket-attribution"
+      assert git(source, ["worktree", "list", "--porcelain"]) =~ workspace
+    after
+      Workspace.remove_issue_workspaces(task)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "owned linked worktrees make shared Git metadata writable for Codex turns" do
     test_root = tmp_path("worktree-sandbox")
     repository_root = Path.join(test_root, "repositories")
@@ -260,12 +287,12 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
     end
   end
 
-  defp issue(id, title, repository \\ nil) do
+  defp issue(id, title, repository \\ nil, task_id \\ nil) do
     %Issue{
       id: id,
       identifier: "TODOIST-#{id}",
       title: title,
-      execution_settings: %TaskExecutionSettings{repo: repository},
+      execution_settings: %TaskExecutionSettings{repo: repository, task_id: task_id},
       dispatchable: true
     }
   end

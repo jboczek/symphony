@@ -14,7 +14,13 @@ defmodule SymphonyElixir.Workspace do
   @spec runtime_info(map(), Path.t()) :: %{repository: String.t() | nil, branch: String.t() | nil}
   def runtime_info(%{execution_settings: %TaskExecutionSettings{repo: repository}} = issue, _workspace)
       when is_binary(repository) do
-    %{repository: repository, branch: "symphony/#{workspace_identity(issue)}"}
+    branch =
+      case worktree_branch(issue) do
+        {:ok, branch} -> branch
+        {:error, _reason} -> initial_worktree_branch(issue)
+      end
+
+    %{repository: repository, branch: branch}
   end
 
   def runtime_info(_issue, _workspace), do: %{repository: nil, branch: nil}
@@ -82,7 +88,7 @@ defmodule SymphonyElixir.Workspace do
         with {:ok, repository} <-
                RepositoryResolver.resolve(repository_name, Config.local_repository_root()),
              task_identity <- workspace_identity(issue),
-             branch <- "symphony/#{task_identity}",
+             {:ok, branch} <- worktree_branch(issue),
              {:ok, _metadata, created?} <-
                GitWorktree.ensure(repository, workspace, task_identity, branch) do
           {:ok, workspace, created?, :git_worktree}
@@ -500,7 +506,25 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp title_slug(title) when is_binary(title) do
+  defp worktree_branch(issue) do
+    case GitWorktree.lookup(workspace_identity(issue)) do
+      {:ok, %{branch: branch}} -> {:ok, branch}
+      {:ok, nil} -> {:ok, initial_worktree_branch(issue)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp initial_worktree_branch(%{
+         execution_settings: %TaskExecutionSettings{task_id: task_id},
+         title: title
+       })
+       when is_binary(task_id) and is_binary(title) do
+    "feature/#{task_id}-#{title_slug(title, 50)}"
+  end
+
+  defp initial_worktree_branch(issue), do: "symphony/#{workspace_identity(issue)}"
+
+  defp title_slug(title, limit \\ 64) when is_binary(title) and is_integer(limit) and limit > 0 do
     title
     |> String.normalize(:nfc)
     |> String.downcase()
@@ -508,7 +532,7 @@ defmodule SymphonyElixir.Workspace do
     |> String.replace(~r/-+/, "-")
     |> String.trim("-")
     |> String.graphemes()
-    |> Enum.take(64)
+    |> Enum.take(limit)
     |> Enum.join()
     |> String.trim("-")
     |> case do

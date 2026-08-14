@@ -3,13 +3,14 @@ defmodule SymphonyElixir.TaskExecutionSettings do
   Typed per-task Symphony overrides parsed from Todoist description front matter.
   """
 
-  @allowed_keys MapSet.new(["repo", "model", "thinking"])
+  @allowed_keys MapSet.new(["repo", "model", "task_id", "thinking"])
 
-  defstruct [:repo, :model, :thinking]
+  defstruct [:repo, :model, :task_id, :thinking]
 
   @type t :: %__MODULE__{
           repo: String.t() | nil,
           model: String.t() | nil,
+          task_id: String.t() | nil,
           thinking: String.t() | nil
         }
 
@@ -115,8 +116,9 @@ defmodule SymphonyElixir.TaskExecutionSettings do
         with :ok <- validate_keys(settings),
              {:ok, repo} <- optional_value(settings, "repo", &valid_repository_name?/1),
              {:ok, model} <- optional_value(settings, "model", &present_string?/1),
+             {:ok, task_id} <- optional_task_id(settings),
              {:ok, thinking} <- optional_value(settings, "thinking", &present_string?/1) do
-          {:ok, %__MODULE__{repo: repo, model: model, thinking: thinking}, String.trim(body)}
+          {:ok, %__MODULE__{repo: repo, model: model, task_id: task_id, thinking: thinking}, String.trim(body)}
         end
 
       {:ok, _other} ->
@@ -147,6 +149,22 @@ defmodule SymphonyElixir.TaskExecutionSettings do
     end
   end
 
+  defp optional_task_id(settings) do
+    case fetch_value(settings, "task_id") do
+      :missing ->
+        {:ok, nil}
+
+      {:ok, value} when is_integer(value) and value > 0 ->
+        {:ok, Integer.to_string(value)}
+
+      {:ok, value} when is_binary(value) ->
+        if valid_task_id?(value), do: {:ok, value}, else: invalid({:invalid_value, "task_id"})
+
+      {:ok, _value} ->
+        invalid({:invalid_value, "task_id"})
+    end
+  end
+
   defp fetch_value(map, key) do
     cond do
       Map.has_key?(map, key) -> {:ok, Map.fetch!(map, key)}
@@ -156,6 +174,8 @@ defmodule SymphonyElixir.TaskExecutionSettings do
   end
 
   defp present_string?(value) when is_binary(value), do: String.trim(value) != ""
+
+  defp valid_task_id?(value), do: String.match?(value, ~r/\A[1-9][0-9]*\z/)
 
   defp invalid(reason), do: {:error, {:invalid_task_execution_settings, reason}}
 end

@@ -325,11 +325,14 @@ codex:
   labels, priority, timestamps, URL, and native project/task/section IDs are normalized; Todoist
   parent/subtask relations do not become blockers.
 - Per-task execution settings: a description may begin with YAML front matter containing exact
-  `symphony.repo`, `symphony.model`, and `symphony.thinking` values. The front matter may be raw or
+  `symphony.repo`, `symphony.task_id`, `symphony.model`, and `symphony.thinking` values. The front
+  matter may be raw or
   wrapped in a Markdown code fence (bare or with a `yaml`/`yml` language marker) for visibility in
   Todoist.
   `repo` selects a local Git repository under `repositories.root`; Symphony creates an isolated
-  `symphony/todoist-<task-id>` worktree and reuses it by stable task ID after title changes. Model
+  `feature/<task_id>-<task-title>` worktree branch when `task_id` is present, otherwise it uses
+  `symphony/todoist-<task-id>`. It reuses the recorded branch by stable Todoist task ID after title
+  changes. Model
   and reasoning values are passed directly to App Server and validated with `model/list`. Invalid
   front matter or unavailable values are commented and moved to `Blocked`.
 

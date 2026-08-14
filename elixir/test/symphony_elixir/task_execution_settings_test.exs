@@ -47,6 +47,20 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
             }, "Ship it."} = TaskExecutionSettings.parse(description)
   end
 
+  test "parses a numeric task ID for a feature branch" do
+    description = """
+    ---
+    symphony:
+      repo: cse.tools.prompts
+      task_id: 135550
+    ---
+    Ship it.
+    """
+
+    assert {:ok, %TaskExecutionSettings{repo: "cse.tools.prompts", task_id: "135550"}, "Ship it."} =
+             TaskExecutionSettings.parse(description)
+  end
+
   test "parses exact settings inside a Markdown code fence" do
     description = """
     ```
@@ -106,6 +120,8 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
       "---\nsymphony:\n  extra: value\n---\nTask",
       "---\nsymphony:\n  model: ' '\n---\nTask",
       "---\nsymphony:\n  model: 42\n---\nTask",
+      "---\nsymphony:\n  task_id: 0\n---\nTask",
+      "---\nsymphony:\n  task_id: ABC-123\n---\nTask",
       "---\nsymphony:\n  repo: ../secrets\n---\nTask",
       "---\nsymphony:\n  repo: nested/repo\n---\nTask",
       "---\nsymphony:\n  repo: .\n---\nTask",
