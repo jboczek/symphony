@@ -170,9 +170,12 @@ Notes:
   app-server update resets it; it is not a total turn runtime cap.
 - Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, and `never`, and object-form `reject` is also supported.
 - Supported `codex.thread_sandbox` values: `read-only`, `workspace-write`, `danger-full-access`.
-- When `codex.turn_sandbox_policy` is set explicitly, Symphony passes the map through to Codex
-  unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
-  Symphony validation.
+- When `codex.turn_sandbox_policy` is set explicitly, Symphony generally passes the map through to
+  Codex unchanged. For a local Symphony-owned Git worktree using `workspaceWrite`, Symphony appends
+  the issue workspace and its verified shared Git metadata directory to `writableRoots`. This lets
+  Git update the worktree index, objects, refs, and fetch metadata while leaving unowned worktrees
+  untouched. Compatibility of the remaining policy depends on the targeted Codex app-server
+  version rather than local Symphony validation.
 - Workflows that run package managers or other commands that resolve external hosts should set
   `networkAccess: true` in `codex.turn_sandbox_policy`; otherwise DNS/network access may be denied
   by the Codex turn sandbox.
@@ -322,8 +325,10 @@ codex:
   labels, priority, timestamps, URL, and native project/task/section IDs are normalized; Todoist
   parent/subtask relations do not become blockers.
 - Per-task execution settings: a description may begin with YAML front matter containing exact
-  `symphony.repo`, `symphony.model`, and `symphony.thinking` values. `repo` selects a local Git
-  repository under `repositories.root`; Symphony creates an isolated
+  `symphony.repo`, `symphony.model`, and `symphony.thinking` values. The front matter may be raw or
+  wrapped in a Markdown code fence (bare or with a `yaml`/`yml` language marker) for visibility in
+  Todoist.
+  `repo` selects a local Git repository under `repositories.root`; Symphony creates an isolated
   `symphony/todoist-<task-id>` worktree and reuses it by stable task ID after title changes. Model
   and reasoning values are passed directly to App Server and validated with `model/list`. Invalid
   front matter or unavailable values are commented and moved to `Blocked`.
