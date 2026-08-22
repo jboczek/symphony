@@ -145,6 +145,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> record_completed_session(issue_id, running_entry, reason)
 
         session_id = running_entry_session_id(running_entry)
+        finalize_tracker_agent_run(running_entry)
 
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
 
@@ -238,6 +239,18 @@ defmodule SymphonyElixir.Orchestrator do
     Logger.debug("Orchestrator ignored message: #{inspect(msg)}")
     {:noreply, state}
   end
+
+  defp finalize_tracker_agent_run(%{issue: %Issue{} = issue, started_at: %DateTime{} = started_at}) do
+    case Tracker.finalize_agent_run(issue, started_at) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Unable to finalize tracker handoff for #{issue_context(issue)}: #{inspect(reason)}")
+    end
+  end
+
+  defp finalize_tracker_agent_run(_running_entry), do: :ok
 
   defp handle_agent_down(:normal, state, issue_id, running_entry, session_id) do
     if input_required_blocker?(running_entry) do

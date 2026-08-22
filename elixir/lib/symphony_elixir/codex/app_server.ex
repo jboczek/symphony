@@ -109,7 +109,10 @@ defmodule SymphonyElixir.Codex.AppServer do
 
     tool_executor =
       Keyword.get(opts, :tool_executor, fn tool, arguments ->
-        DynamicTool.execute(tool, arguments, dynamic_tool_binding, issue: issue)
+        DynamicTool.execute(tool, arguments, dynamic_tool_binding,
+          issue: issue,
+          workspace: workspace
+        )
       end)
 
     turn_settings = %{

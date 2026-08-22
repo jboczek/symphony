@@ -11,8 +11,9 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
 
     assert settings.tracker.kind == "todoist"
     assert settings.tracker.provider == %{"project" => "_agents"}
-    assert settings.tracker.active_states == ["Todo", "InProgress", "Rework", "Merging"]
+    assert settings.tracker.active_states == ["Todo", "InProgress", "Verify", "Rework", "Merging"]
     assert settings.tracker.terminal_states == ["Done"]
+    assert settings.agent.session_boundary_states == ["Verify"]
 
     assert settings.codex.command =~ "--model gpt-5.6-luna"
     assert settings.codex.command =~ "model_reasoning_effort=xhigh"
@@ -26,13 +27,18 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
 
     assert settings.codex.turn_sandbox_policy == %{
              "type" => "workspaceWrite",
-             "networkAccess" => true
+             "networkAccess" => true,
+             "writableRoots" => ["/Users/your-username/.azure"]
            }
 
     assert workflow.prompt =~ "## Codex Workpad"
     assert workflow.prompt =~ "Todo -> InProgress"
     assert workflow.prompt =~ "`Blocked`: missing external input"
     assert workflow.prompt =~ "Move the task to `Blocked`"
+    assert workflow.prompt =~ "invoke the `verify` skill"
+    assert workflow.prompt =~ "`Pass` -> `HumanReview`"
+    assert workflow.prompt =~ "`Fail` or `Inconclusive` -> `Rework`"
+    assert workflow.prompt =~ "Do not move the task yourself"
     assert workflow.prompt =~ "HumanReview"
     assert workflow.prompt =~ "Rework"
     refute workflow.prompt =~ "td task complete"

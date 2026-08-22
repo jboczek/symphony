@@ -14,6 +14,7 @@ defmodule SymphonyElixir.Todoist.Adapter do
 
   @blocked_comment_marker "[SYMPHONY_BLOCKED_V1]"
   @checkpoint_comment_marker "[SYMPHONY_CHECKPOINT_V1]"
+  @verification_report_heading "# Verification report"
 
   @impl true
   def validate_config(tracker_settings) do
@@ -81,6 +82,24 @@ defmodule SymphonyElixir.Todoist.Adapter do
 
     with {:ok, _comment} <- cli_module().create_comment(tracker_settings, task_id, comment),
          {:ok, _task} <- cli_module().move_task(tracker_settings, task_id, "Blocked") do
+      :ok
+    end
+  end
+
+  @impl true
+  def finalize_agent_run(%Issue{id: task_id, state: state}, %DateTime{} = started_at)
+      when is_binary(task_id) and is_binary(state) do
+    if normalize_state(state) == "verify" do
+      tracker_settings = Config.settings!().tracker
+
+      with {:ok, current_issues} <- fetch_issues_by_ids([task_id]),
+           :ok <- ensure_verification_state(current_issues),
+           {:ok, comments} <- cli_module().list_comments(tracker_settings, task_id),
+           {:ok, verdict} <- verification_verdict_since(comments, started_at),
+           {:ok, _task} <- cli_module().move_task(tracker_settings, task_id, verdict_section(verdict)) do
+        :ok
+      end
+    else
       :ok
     end
   end
@@ -234,6 +253,51 @@ defmodule SymphonyElixir.Todoist.Adapter do
   end
 
   defp checkpoint_comment?(_comment), do: false
+
+  defp verification_verdict_since(comments, started_at) do
+    comments
+    |> Enum.filter(&(verification_report?(&1) and comment_posted_since?(&1, started_at)))
+    |> Enum.max_by(&comment_timestamp/1, fn -> nil end)
+    |> verification_verdict()
+  end
+
+  defp ensure_verification_state([%Issue{state: state} | _]) do
+    if normalize_state(state) == "verify", do: :ok, else: {:error, :verification_state_changed}
+  end
+
+  defp ensure_verification_state([]), do: {:error, :verification_task_missing}
+
+  defp verification_report?(%{"content" => content}) when is_binary(content) do
+    content
+    |> String.split(~r/\R/u, parts: 2)
+    |> List.first()
+    |> String.starts_with?(@verification_report_heading)
+  end
+
+  defp verification_report?(_comment), do: false
+
+  defp verification_verdict(%{"content" => content}) when is_binary(content) do
+    case Regex.run(~r/^- Verdict:\s*(Pass|Fail|Inconclusive)\s*$/mi, content, capture: :all_but_first) do
+      ["Pass"] -> {:ok, :pass}
+      ["Fail"] -> {:ok, :fail}
+      ["Inconclusive"] -> {:ok, :inconclusive}
+      _ -> {:error, :invalid_verification_report_verdict}
+    end
+  end
+
+  defp verification_verdict(nil), do: {:error, :verification_report_missing}
+
+  defp comment_posted_since?(comment, started_at) do
+    with timestamp when is_binary(timestamp) <- comment_timestamp(comment),
+         {:ok, posted_at, _offset} <- DateTime.from_iso8601(timestamp) do
+      DateTime.compare(posted_at, started_at) in [:eq, :gt]
+    else
+      _ -> false
+    end
+  end
+
+  defp verdict_section(:pass), do: "HumanReview"
+  defp verdict_section(verdict) when verdict in [:fail, :inconclusive], do: "Rework"
 
   defp comment_timestamp(comment) do
     comment["postedAt"] || comment["addedAt"] || comment["createdAt"] || ""

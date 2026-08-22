@@ -2,9 +2,9 @@ defmodule SymphonyElixir.Tracker do
   @moduledoc """
   Adapter boundary for issue tracker reads and provider-native agent tools.
 
-  The orchestrator only depends on the read callbacks. Agent-side mutations stay
-  behind optional provider-native tools so tracker-specific capabilities do not
-  leak into scheduler policy.
+  The orchestrator depends on tracker reads plus optional lifecycle callbacks.
+  Agent-side mutations stay behind provider-native tools; tracker-owned automatic
+  lifecycle transitions stay behind their adapter callback.
   """
 
   alias SymphonyElixir.Config
@@ -23,6 +23,7 @@ defmodule SymphonyElixir.Tracker do
   @callback fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   @callback fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   @callback block_issue(Issue.t(), String.t()) :: :ok | {:error, term()}
+  @callback finalize_agent_run(Issue.t(), DateTime.t()) :: :ok | {:error, term()}
   @callback latest_checkpoint_comment(Issue.t()) :: {:ok, map() | nil} | {:error, term()}
   @callback agent_tool_specs() :: [map()]
   @callback execute_agent_tool(String.t(), term(), keyword()) :: map()
@@ -32,6 +33,7 @@ defmodule SymphonyElixir.Tracker do
   @optional_callbacks agent_tool_specs: 0,
                       execute_agent_tool: 3,
                       block_issue: 2,
+                      finalize_agent_run: 2,
                       latest_checkpoint_comment: 1,
                       validate_config: 1
 
@@ -51,6 +53,17 @@ defmodule SymphonyElixir.Tracker do
 
     if Code.ensure_loaded?(adapter) and function_exported?(adapter, :block_issue, 2) do
       adapter.block_issue(issue, reason)
+    else
+      :ok
+    end
+  end
+
+  @spec finalize_agent_run(Issue.t(), DateTime.t()) :: :ok | {:error, term()}
+  def finalize_agent_run(%Issue{} = issue, %DateTime{} = started_at) do
+    adapter = adapter()
+
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :finalize_agent_run, 2) do
+      adapter.finalize_agent_run(issue, started_at)
     else
       :ok
     end

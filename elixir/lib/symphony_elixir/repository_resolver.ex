@@ -1,6 +1,6 @@
 defmodule SymphonyElixir.RepositoryResolver do
   @moduledoc """
-  Resolves exact direct-child Git repositories beneath the configured repository root.
+  Resolves Git repositories beneath the configured repository root.
   """
 
   alias SymphonyElixir.{PathSafety, TaskExecutionSettings}
@@ -32,7 +32,7 @@ defmodule SymphonyElixir.RepositoryResolver do
 
     with {:ok, canonical_candidate} <- PathSafety.canonicalize(candidate) do
       cond do
-        Path.dirname(canonical_candidate) != canonical_root ->
+        not within_root?(canonical_candidate, canonical_root) ->
           {:error, {:repository_outside_root, repository_name}}
 
         !File.dir?(canonical_candidate) ->
@@ -41,6 +41,13 @@ defmodule SymphonyElixir.RepositoryResolver do
         true ->
           {:ok, canonical_candidate}
       end
+    end
+  end
+
+  defp within_root?(candidate, root) do
+    case Path.split(Path.relative_to(candidate, root)) do
+      [".." | _] -> false
+      _ -> true
     end
   end
 
