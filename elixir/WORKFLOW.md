@@ -37,6 +37,9 @@ codex:
   turn_sandbox_policy:
     type: workspaceWrite
     networkAccess: true
+browser:
+  endpoint: ws://127.0.0.1:3000/
+  expose_network: <loopback>
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

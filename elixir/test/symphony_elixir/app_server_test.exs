@@ -586,11 +586,12 @@ defmodule SymphonyElixir.AppServerTest do
                        %{
                          "description" => description,
                          "inputSchema" => %{"required" => ["query"]},
-                         "name" => "linear_graphql"
+                         "name" => "linear_graphql",
+                         "type" => "function"
                        },
                        %{
-                         "deferLoading" => true,
-                         "name" => "browser"
+                         "name" => "browser",
+                         "type" => "function"
                        }
                      ] ->
                        description =~ "Linear"

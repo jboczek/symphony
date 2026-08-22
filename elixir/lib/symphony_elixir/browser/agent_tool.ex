@@ -1,10 +1,12 @@
 defmodule SymphonyElixir.Browser.AgentTool do
   @moduledoc """
-  A deferred, host-side browser tool backed by Playwright CLI.
+  A host-side browser tool backed by Playwright CLI.
 
   The browser process starts on the first `open` action and is reused for the
   lifetime of the Codex app-server session. Web applications and browser-xterm
-  instances use the same URL-based interface.
+  instances use the same URL-based interface. When a remote endpoint is
+  configured, the local CLI daemon connects to a Playwright browser server
+  instead of launching a browser on the Symphony host.
   """
 
   alias SymphonyElixir.SSH
@@ -19,7 +21,6 @@ defmodule SymphonyElixir.Browser.AgentTool do
       %{
         "type" => "function",
         "name" => @tool_name,
-        "deferLoading" => true,
         "description" =>
           "Control a lazily started browser for local web UI verification. " <>
             "Use the same tool for browser-xterm after starting browser-xterm through the shell. " <>
@@ -62,6 +63,8 @@ defmodule SymphonyElixir.Browser.AgentTool do
 
     %{
       session: Keyword.get_lazy(opts, :session, &new_session_name/0),
+      endpoint: normalize_optional_string(Keyword.get(opts, :endpoint)),
+      expose_network: Keyword.get(opts, :expose_network, "<loopback>"),
       opened: opened,
       tool_specs: tool_specs()
     }
@@ -235,12 +238,13 @@ defmodule SymphonyElixir.Browser.AgentTool do
 
   defp run_cli(command, binding, opts) do
     runner = Keyword.get(opts, :browser_cli_runner, &default_cli_runner/2)
-    args = ["-s=#{binding.session}"] ++ command ++ ["--json"]
-    runner.(args, command_context(binding, opts))
+    context = command_context(binding, opts)
+    args = ["-s=#{binding.session}"] ++ command ++ remote_config_args(command, context) ++ ["--json"]
+    runner.(args, context)
   end
 
   defp default_cli_runner(args, %{worker_host: nil} = context) do
-    with :ok <- File.mkdir_p(context.runtime_dir),
+    with :ok <- prepare_runtime(context),
          {:ok, executable, prefix_args} <- local_cli_command() do
       {output, status} =
         System.cmd(executable, prefix_args ++ args,
@@ -323,10 +327,43 @@ defmodule SymphonyElixir.Browser.AgentTool do
 
     %{
       runtime_dir: runtime_dir(binding, worker_host),
+      remote_endpoint: if(is_nil(worker_host), do: binding.endpoint),
+      expose_network: binding.expose_network,
       worker_host: worker_host,
       workspace: Keyword.get(opts, :workspace)
     }
   end
+
+  defp prepare_runtime(context) do
+    with :ok <- File.mkdir_p(context.runtime_dir) do
+      write_remote_config(context)
+    end
+  end
+
+  defp write_remote_config(%{remote_endpoint: nil}), do: :ok
+
+  defp write_remote_config(context) do
+    config = %{
+      "browser" => %{
+        "browserName" => "chromium",
+        "remoteEndpoint" => %{
+          "browserName" => "chromium",
+          "endpoint" => context.remote_endpoint,
+          "exposeNetwork" => context.expose_network
+        }
+      }
+    }
+
+    File.write(remote_config_path(context), Jason.encode!(config))
+  end
+
+  defp remote_config_args(["open" | _], %{remote_endpoint: endpoint} = context)
+       when is_binary(endpoint),
+       do: ["--config", remote_config_path(context)]
+
+  defp remote_config_args(_command, _context), do: []
+
+  defp remote_config_path(context), do: Path.join(context.runtime_dir, "playwright-cli.json")
 
   defp runtime_dir(binding, nil),
     do: Path.join(System.tmp_dir!(), "symphony-browser-#{binding.session}")
@@ -444,6 +481,15 @@ defmodule SymphonyElixir.Browser.AgentTool do
   defp missing_cli_message do
     "Playwright CLI is unavailable; install Node.js/npm or place playwright-cli on PATH."
   end
+
+  defp normalize_optional_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_optional_string(_value), do: nil
 
   defp shell_escape(value), do: "'" <> String.replace(value, "'", "'\"'\"'") <> "'"
 end

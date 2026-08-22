@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   """
 
   alias SymphonyElixir.Browser.AgentTool, as: BrowserTool
-  alias SymphonyElixir.Tracker
+  alias SymphonyElixir.{Config, Tracker}
 
   @spec execute(String.t() | nil, term(), map(), keyword()) :: map()
   def execute(tool, arguments, binding, opts \\ []) do
@@ -18,12 +18,18 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   @spec bind() :: map()
   def bind do
     tracker = Tracker.bind_agent_tools()
-    browser = BrowserTool.bind()
+    browser_config = Config.settings!().browser
+
+    browser =
+      BrowserTool.bind(
+        endpoint: browser_config.endpoint,
+        expose_network: browser_config.expose_network
+      )
 
     %{
       tracker: tracker,
       browser: browser,
-      tool_specs: tracker.tool_specs ++ browser.tool_specs,
+      tool_specs: Enum.map(tracker.tool_specs ++ browser.tool_specs, &canonical_tool_spec/1),
       secret_environment_names: tracker.secret_environment_names
     }
   end
@@ -32,4 +38,6 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   def close(binding, opts \\ []) do
     BrowserTool.close(binding.browser, opts)
   end
+
+  defp canonical_tool_spec(spec), do: Map.put_new(spec, "type", "function")
 end

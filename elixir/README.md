@@ -37,12 +37,36 @@ and Symphony closes it when the session ends. For SSH workers, commands execute 
 its loopback URLs remain reachable.
 
 The browser tool prefers `playwright-cli` on `PATH` and otherwise lazily runs the pinned
-`@playwright/cli` package through `npx`. Browser hosts therefore need Node.js/npm plus an available
-Chrome installation. Provision a browser explicitly when necessary:
+`@playwright/cli` package through `npx`. Without `browser.endpoint`, the Symphony host therefore
+needs Node.js/npm plus an available Chrome installation. Provision a browser explicitly when
+necessary:
 
 ```bash
 npx --yes --package @playwright/cli@0.1.18 playwright-cli install-browser chrome
 ```
+
+On macOS, run the browser in Colima to avoid launching Chrome across the Codex application sandbox
+boundary. Install the VM runtime, Docker CLI, and Compose plugin, then start the browser server:
+
+```bash
+brew install colima docker docker-compose
+colima start
+docker-compose -f compose.browser.yml up -d --build --wait
+```
+
+Configure the local Symphony workflow to use it:
+
+```yaml
+browser:
+  endpoint: ws://127.0.0.1:3000/
+  expose_network: <loopback>
+```
+
+The local `playwright-cli` remains the session client, while Chromium runs inside Colima.
+`expose_network: <loopback>` forwards URLs served on the Mac's loopback interface to the container.
+The image pins the server version required by `@playwright/cli@0.1.18`. Enable Colima at login with
+`brew services start colima`; the browser container uses `restart: unless-stopped` and returns after
+the Docker Engine starts.
 
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.

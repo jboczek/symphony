@@ -53,6 +53,8 @@ make all
 - Follow existing module/style patterns in `lib/symphony_elixir/*`.
 - Provide browser-based visual verification to Symphony-managed agents through a host-side dynamic
   tool; do not rely on Codex Desktop browser availability.
+- Verify combined dynamic-tool lists against the current Codex app-server protocol; every tool in
+  one request must consistently use the canonical format.
 
 Validation command:
 
