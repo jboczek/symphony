@@ -7,6 +7,19 @@ description:
 
 # Push
 
+## Non-negotiable PR command policy
+
+- Use only the configured Git subcommands `git prget`, `git prdesc`, and
+  `git prupdate` for PR inspection, creation, and updates.
+- Never substitute `az repos pr`, `gh pr`, direct REST/API calls, or another
+  provider CLI, even when the Git subcommand is unavailable or fails.
+- Do not hide errors with `|| true`, `2>/dev/null`, or similar constructs in
+  publication commands. If a required Git subcommand is unavailable or
+  returns an error other than the documented "no active PR" result, stop and
+  report the exact error.
+- The PR must be created by `git prdesc`; the final URL must come from its
+  output or from a subsequent `git prget`.
+
 ## Goals
 
 - Push current branch changes to `origin` safely.
@@ -25,7 +38,8 @@ description:
 1. Identify current branch and confirm remote state.
 2. Run local validation (`make -C elixir all`) before pushing.
 3. Push branch to `origin` with upstream tracking if needed, using whatever
-   remote URL is already configured.
+   remote URL is already configured. Use `git push -u origin HEAD`; do not use
+   a manual refspec to publish a differently named remote branch.
 4. If push is not clean/rejected:
    - If the failure is a non-fast-forward or sync problem, run the `pull`
      skill to merge `origin/main`, resolve conflicts, and rerun validation.
@@ -40,6 +54,8 @@ description:
      `git prupdate`.
    - Stop on any other `git prget` failure; do not treat authentication,
      permission, or service errors as a missing PR.
+   - If `git prget` is not installed or cannot be invoked, stop. Do not fall
+     back to `az repos pr`, `gh pr`, or direct API calls.
    - Give a new PR a title that describes its total scope. `git prupdate`
      changes only the description, so stop if the current title is no longer
      accurate.
@@ -61,7 +77,7 @@ description:
 # Identify branch
 branch=$(git branch --show-current)
 
-# Initial push: respect the current origin remote.
+# Initial push: respect the current origin remote and current branch name.
 git push -u origin HEAD
 
 # If that failed because the remote moved, use the pull skill. After
@@ -104,4 +120,7 @@ git prget
   - Surface auth, permissions, or workflow restrictions directly instead of
     changing remotes or protocols.
 - The configured PR aliases target Azure DevOps and operate on the current
-  branch. Do not substitute `gh pr` or direct `az repos pr` commands.
+  branch. Do not substitute `gh pr`, `az repos pr`, or direct API calls.
+- If the local branch name is not the intended PR source branch, resolve the
+  branch state before pushing or stop and report the mismatch. Do not publish
+  a different remote branch through a manual refspec as a workaround.
