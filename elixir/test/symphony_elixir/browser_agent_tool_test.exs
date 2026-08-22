@@ -3,10 +3,9 @@ defmodule SymphonyElixir.Browser.AgentToolTest do
 
   alias SymphonyElixir.Browser.AgentTool
 
-  test "advertises one deferred browser tool" do
+  test "advertises one browser tool" do
     assert [
              %{
-               "deferLoading" => true,
                "description" => description,
                "inputSchema" => %{
                  "properties" => %{"action" => %{"enum" => actions}},
@@ -59,6 +58,67 @@ defmodule SymphonyElixir.Browser.AgentToolTest do
 
     assert :ok = AgentTool.close(binding, browser_cli_runner: runner)
     assert_received {:browser_cli, ["-s=browser-test", "close", "--json"], _}
+  end
+
+  test "configures the local cli to connect to a remote browser server" do
+    binding =
+      AgentTool.bind(
+        session: "remote-browser-test",
+        endpoint: "ws://127.0.0.1:3000/",
+        expose_network: "<loopback>"
+      )
+
+    test_pid = self()
+
+    runner = fn args, context ->
+      send(test_pid, {:browser_cli, args, context})
+      {:ok, "ok"}
+    end
+
+    assert %{"success" => true} =
+             AgentTool.execute(
+               "browser",
+               %{"action" => "open", "url" => "http://127.0.0.1:4000"},
+               binding,
+               browser_cli_runner: runner
+             )
+
+    assert_received {:browser_cli,
+                     [
+                       "-s=remote-browser-test",
+                       "open",
+                       "http://127.0.0.1:4000",
+                       "--config",
+                       config_path,
+                       "--json"
+                     ],
+                     %{
+                       remote_endpoint: "ws://127.0.0.1:3000/",
+                       expose_network: "<loopback>"
+                     }}
+
+    assert Path.basename(config_path) == "playwright-cli.json"
+  end
+
+  test "keeps SSH workers on their own browser host" do
+    binding = AgentTool.bind(session: "remote-worker-test", endpoint: "ws://127.0.0.1:3000/")
+    test_pid = self()
+
+    runner = fn args, context ->
+      send(test_pid, {:browser_cli, args, context})
+      {:ok, "ok"}
+    end
+
+    assert %{"success" => true} =
+             AgentTool.execute(
+               "browser",
+               %{"action" => "open", "url" => "http://127.0.0.1:4000"},
+               binding,
+               browser_cli_runner: runner,
+               worker_host: "worker.example"
+             )
+
+    assert_received {:browser_cli, ["-s=remote-worker-test", "open", "http://127.0.0.1:4000", "--json"], %{remote_endpoint: nil, worker_host: "worker.example"}}
   end
 
   test "maps interaction actions to playwright cli commands" do

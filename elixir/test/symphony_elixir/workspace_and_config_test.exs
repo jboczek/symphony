@@ -5,6 +5,39 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
   alias SymphonyElixir.Linear.Client
 
+  test "browser server configuration is optional and validates its endpoint" do
+    assert {:ok, defaults} = Schema.parse(%{tracker: %{kind: "memory"}})
+    assert defaults.browser.endpoint == nil
+    assert defaults.browser.expose_network == "<loopback>"
+
+    assert {:ok, configured} =
+             Schema.parse(%{
+               tracker: %{kind: "memory"},
+               browser: %{
+                 endpoint: "ws://127.0.0.1:3000/",
+                 expose_network: "<loopback>"
+               }
+             })
+
+    assert configured.browser.endpoint == "ws://127.0.0.1:3000/"
+
+    assert {:error, {:invalid_workflow_config, error}} =
+             Schema.parse(%{
+               tracker: %{kind: "memory"},
+               browser: %{endpoint: "file:///tmp/browser.sock"}
+             })
+
+    assert error =~ "browser.endpoint"
+
+    assert {:error, {:invalid_workflow_config, error}} =
+             Schema.parse(%{
+               tracker: %{kind: "memory"},
+               browser: %{endpoint: "ws://127.0.0.1:3000/", expose_network: " "}
+             })
+
+    assert error =~ "browser.expose_network"
+  end
+
   test "workspace bootstrap can be implemented in after_create hook" do
     test_root =
       Path.join(

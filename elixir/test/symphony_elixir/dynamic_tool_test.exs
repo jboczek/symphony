@@ -52,8 +52,10 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
 
     binding = BoundDynamicTool.bind()
 
+    assert Enum.all?(binding.tool_specs, &(&1["type"] == "function"))
+
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
-    assert [%{"name" => "browser"}] = BoundDynamicTool.bind().tool_specs
+    assert [%{"name" => "browser", "type" => "function"}] = BoundDynamicTool.bind().tool_specs
 
     test_pid = self()
 
