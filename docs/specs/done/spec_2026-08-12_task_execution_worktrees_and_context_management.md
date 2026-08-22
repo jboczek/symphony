@@ -63,9 +63,14 @@ to Todoist before compacting and resuming a thread whose active context reaches 
 - [x] A task repository resolves to the exact direct child of the configured repository root.
 - [x] A repository-backed workspace is that task's Git worktree; Codex starts with the worktree as
   `cwd` and no per-task clone is performed.
-- [x] Concurrent tasks for one source repository receive independent deterministic branches and
-  worktrees based on the existing branch convention or `symphony/<task-identity>`.
+- [x] Concurrent tasks for one source repository receive independent deterministic
+  `feature/<task-id>-<slug>` branches and worktrees. An explicit task ID takes precedence; Todoist
+  tasks fall back to their native stable ID.
 - [x] Resume reuses the correct worktree by stable task identity even after a title rename.
+- [x] Resume adopts an existing owned feature branch and migrates legacy `symphony/...` branches to
+  the feature convention.
+- [x] Local owned worktrees use a scoped Codex permission profile that permits Git metadata writes
+  without granting unrestricted filesystem access.
 - [x] A workspace associated with another repository fails safely.
 - [x] Cleanup invokes the before-remove behavior, detaches only a Symphony-owned linked worktree,
   tolerates stale worktree metadata, and never modifies/removes a primary working tree.

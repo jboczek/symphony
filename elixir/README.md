@@ -188,11 +188,11 @@ Notes:
 - Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, and `never`, and object-form `reject` is also supported.
 - Supported `codex.thread_sandbox` values: `read-only`, `workspace-write`, `danger-full-access`.
 - When `codex.turn_sandbox_policy` is set explicitly, Symphony generally passes the map through to
-  Codex unchanged. For a local Symphony-owned Git worktree using `workspaceWrite`, Symphony appends
-  the issue workspace and its verified shared Git metadata directory to `writableRoots`. This lets
-  Git update the worktree index, objects, refs, and fetch metadata while leaving unowned worktrees
-  untouched. Compatibility of the remaining policy depends on the targeted Codex app-server
-  version rather than local Symphony validation.
+  Codex unchanged. For a local Symphony-owned Git worktree using `workspaceWrite`, Symphony uses a
+  scoped Codex permission profile instead: the issue workspace and its verified shared Git metadata
+  directory are writable, while the worktree `.git` pointer, `.codex`, and `.agents` remain
+  read-only. This is required because legacy `workspaceWrite` always protects Git metadata even
+  when `.git` is listed in `writableRoots`. Unowned worktrees keep the configured policy unchanged.
 - Workflows that run package managers or other commands that resolve external hosts should set
   `networkAccess: true` in `codex.turn_sandbox_policy`; otherwise DNS/network access may be denied
   by the Codex turn sandbox.
@@ -350,9 +350,10 @@ codex:
   wrapped in a Markdown code fence (bare or with a `yaml`/`yml` language marker) for visibility in
   Todoist.
   `repo` selects a local Git repository under `repositories.root`; Symphony creates an isolated
-  `feature/<task_id>-<task-title>` worktree branch when `task_id` is present, otherwise it uses
-  `symphony/todoist-<task-id>`. It reuses the recorded branch by stable Todoist task ID after title
-  changes. Model
+  `feature/<task_id>-<task-title>` worktree branch. The explicit `symphony.task_id` is used when
+  present; otherwise Symphony uses the native Todoist task ID. It reuses the recorded branch by
+  stable Todoist task ID after title changes and adopts the current branch of a verified existing
+  owned worktree if older agent behavior renamed it. Model
   and reasoning values are passed directly to App Server and validated with `model/list`. Invalid
   front matter or unavailable values are commented and moved to `Blocked`.
 

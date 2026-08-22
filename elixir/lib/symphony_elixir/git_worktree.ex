@@ -34,9 +34,10 @@ defmodule SymphonyElixir.GitWorktree do
          :ok <- validate_metadata(existing_metadata, repository, workspace),
          {:ok, created?} <- ensure_linked_worktree(repository, workspace, branch),
          {:ok, actual_branch} <- current_branch(workspace),
-         :ok <- validate_branch(actual_branch, branch),
+         {:ok, effective_branch} <-
+           reconcile_branch(workspace, actual_branch, branch, created?),
          metadata = %{
-           branch: actual_branch,
+           branch: effective_branch,
            repository: repository,
            task_identity: task_identity,
            workspace: workspace
@@ -85,15 +86,13 @@ defmodule SymphonyElixir.GitWorktree do
 
   def linked_worktree?(_workspace), do: false
 
-  @spec augment_turn_sandbox_policy(map(), Path.t()) :: {:ok, map()} | {:error, term()}
-  def augment_turn_sandbox_policy(%{"type" => "workspaceWrite"} = policy, workspace)
-      when is_binary(workspace) do
-    with {:ok, writable_roots} <- owned_worktree_writable_roots(workspace) do
-      {:ok, append_writable_roots(policy, writable_roots)}
+  @spec owned_worktree_writable_roots(Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
+  def owned_worktree_writable_roots(workspace) when is_binary(workspace) do
+    with {:ok, canonical_workspace} <- PathSafety.canonicalize(workspace),
+         {:ok, metadata} <- metadata_for_workspace(canonical_workspace) do
+      writable_roots_for_metadata(metadata, canonical_workspace)
     end
   end
-
-  def augment_turn_sandbox_policy(policy, _workspace) when is_map(policy), do: {:ok, policy}
 
   defp ensure_linked_worktree(repository, workspace, branch) do
     cond do
@@ -158,6 +157,35 @@ defmodule SymphonyElixir.GitWorktree do
 
   defp validate_branch(actual, expected),
     do: {:error, {:workspace_branch_mismatch, actual, expected}}
+
+  defp reconcile_branch(_workspace, actual, expected, true) do
+    with :ok <- validate_branch(actual, expected), do: {:ok, actual}
+  end
+
+  defp reconcile_branch(workspace, "symphony/" <> _, "feature/" <> _ = expected, false) do
+    case git(workspace, ["branch", "-m", expected]) do
+      {:ok, _output} -> {:ok, expected}
+      {:error, status, output} -> {:error, {:git_branch_migration_failed, status, bounded(output)}}
+    end
+  end
+
+  defp reconcile_branch(_workspace, "feature/" <> _ = actual, "feature/" <> _ = expected, false) do
+    if same_task_feature_branch?(actual, expected) do
+      {:ok, actual}
+    else
+      {:error, {:workspace_branch_mismatch, actual, expected}}
+    end
+  end
+
+  defp reconcile_branch(_workspace, actual, expected, false),
+    do: {:error, {:workspace_branch_mismatch, actual, expected}}
+
+  defp same_task_feature_branch?(actual, expected) do
+    case String.split(String.trim_leading(expected, "feature/"), "-", parts: 2) do
+      [task_id, _slug] -> String.starts_with?(actual, "feature/#{task_id}-")
+      _ -> false
+    end
+  end
 
   defp validate_workspace_location(repository, workspace) do
     root = Config.local_workspace_root()
@@ -252,13 +280,6 @@ defmodule SymphonyElixir.GitWorktree do
     end
   end
 
-  defp owned_worktree_writable_roots(workspace) do
-    with {:ok, canonical_workspace} <- PathSafety.canonicalize(workspace),
-         {:ok, metadata} <- metadata_for_workspace(canonical_workspace) do
-      writable_roots_for_metadata(metadata, canonical_workspace)
-    end
-  end
-
   defp writable_roots_for_metadata(nil, _workspace), do: {:ok, []}
 
   defp writable_roots_for_metadata(%{repository: repository} = metadata, workspace) do
@@ -268,18 +289,6 @@ defmodule SymphonyElixir.GitWorktree do
          :ok <- verify_repository_association(canonical_repository, workspace),
          {:ok, common_dir} <- git_common_dir(workspace) do
       {:ok, [workspace, common_dir]}
-    end
-  end
-
-  defp append_writable_roots(policy, []), do: policy
-
-  defp append_writable_roots(policy, writable_roots) do
-    case Map.get(policy, "writableRoots", []) do
-      configured_roots when is_list(configured_roots) ->
-        Map.put(policy, "writableRoots", Enum.uniq(configured_roots ++ writable_roots))
-
-      _invalid_roots ->
-        policy
     end
   end
 

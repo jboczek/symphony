@@ -11,6 +11,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   @turn_start_id 3
   @model_list_id 4
   @compact_thread_id 5
+  @worktree_permissions_profile "symphony-worktree"
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
   @type session :: %{
@@ -24,6 +25,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           auto_approve_requests: boolean(),
           thread_sandbox: String.t(),
           turn_sandbox_policy: map(),
+          permissions_profile: String.t() | nil,
           thread_id: String.t(),
           workspace: Path.t(),
           worker_host: String.t() | nil,
@@ -48,11 +50,17 @@ defmodule SymphonyElixir.Codex.AppServer do
     dynamic_tool_binding = DynamicTool.bind()
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
-         {:ok, port} <- start_port(expanded_workspace, worker_host, dynamic_tool_binding) do
+         {:ok, configured_policies} <- session_policies(expanded_workspace, worker_host),
+         {:ok, port} <-
+           start_port(
+             expanded_workspace,
+             worker_host,
+             dynamic_tool_binding,
+             configured_policies.permission_config_args
+           ) do
       metadata = port_metadata(port, worker_host)
 
-      with {:ok, configured_policies} <- session_policies(expanded_workspace, worker_host),
-           {:ok, session_policies, validate_overrides?} <-
+      with {:ok, session_policies, validate_overrides?} <-
              apply_execution_settings(configured_policies, execution_settings),
            {:ok, thread} <-
              do_start_session(
@@ -74,6 +82,7 @@ defmodule SymphonyElixir.Codex.AppServer do
            auto_approve_requests: session_policies.approval_policy == "never",
            thread_sandbox: session_policies.thread_sandbox,
            turn_sandbox_policy: session_policies.turn_sandbox_policy,
+           permissions_profile: session_policies.permissions_profile,
            thread_id: thread.id,
            workspace: expanded_workspace,
            worker_host: worker_host,
@@ -97,6 +106,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           approval_policy: approval_policy,
           auto_approve_requests: auto_approve_requests,
           turn_sandbox_policy: turn_sandbox_policy,
+          permissions_profile: permissions_profile,
           thread_id: thread_id,
           workspace: workspace,
           worker_host: worker_host,
@@ -128,7 +138,16 @@ defmodule SymphonyElixir.Codex.AppServer do
         [%{"type" => "text", "text" => prompt}]
       end)
 
-    case start_turn(port, thread_id, turn_input, issue, workspace, turn_settings, turn_sandbox_policy) do
+    case start_turn(
+           port,
+           thread_id,
+           turn_input,
+           issue,
+           workspace,
+           turn_settings,
+           turn_sandbox_policy,
+           permissions_profile
+         ) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
@@ -259,7 +278,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, nil, dynamic_tool_binding) do
+  defp start_port(workspace, nil, dynamic_tool_binding, permission_config_args) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -272,7 +291,10 @@ defmodule SymphonyElixir.Codex.AppServer do
             :binary,
             :exit_status,
             :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding))],
+            args: [
+              ~c"-lc",
+              String.to_charlist(local_launch_command(dynamic_tool_binding, permission_config_args))
+            ],
             cd: String.to_charlist(workspace),
             env: tracker_secret_port_env(dynamic_tool_binding),
             line: @port_line_bytes
@@ -283,15 +305,20 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, worker_host, dynamic_tool_binding) when is_binary(worker_host) do
+  defp start_port(workspace, worker_host, dynamic_tool_binding, _permission_config_args)
+       when is_binary(worker_host) do
     remote_command = remote_launch_command(workspace, dynamic_tool_binding)
     SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
   end
 
-  defp local_launch_command(dynamic_tool_binding) do
+  defp local_launch_command(dynamic_tool_binding, permission_config_args) do
+    command =
+      [Config.settings!().codex.command | Enum.map(permission_config_args, &shell_escape/1)]
+      |> Enum.join(" ")
+
     [
       tracker_secret_unset_command(dynamic_tool_binding),
-      "exec #{Config.settings!().codex.command}"
+      "exec #{command}"
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" && ")
@@ -368,14 +395,80 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   defp session_policies(workspace, nil) do
     with {:ok, policies} <- Config.codex_runtime_settings(workspace),
-         {:ok, turn_sandbox_policy} <-
-           GitWorktree.augment_turn_sandbox_policy(policies.turn_sandbox_policy, workspace) do
-      {:ok, %{policies | turn_sandbox_policy: turn_sandbox_policy}}
+         {:ok, owned_roots} <- GitWorktree.owned_worktree_writable_roots(workspace) do
+      local_session_policies(policies, workspace, owned_roots)
     end
   end
 
   defp session_policies(workspace, worker_host) when is_binary(worker_host) do
-    Config.codex_runtime_settings(workspace, remote: true)
+    with {:ok, policies} <- Config.codex_runtime_settings(workspace, remote: true) do
+      {:ok, Map.merge(policies, %{permissions_profile: nil, permission_config_args: []})}
+    end
+  end
+
+  defp local_session_policies(
+         %{turn_sandbox_policy: %{"type" => "workspaceWrite"} = policy} = policies,
+         workspace,
+         [_workspace, git_dir]
+       ) do
+    configured_roots = Map.get(policy, "writableRoots", [])
+
+    roots =
+      [workspace, git_dir | configured_roots]
+      |> Enum.filter(&(is_binary(&1) and Path.type(&1) == :absolute))
+      |> Enum.uniq()
+
+    {:ok,
+     Map.merge(policies, %{
+       permissions_profile: @worktree_permissions_profile,
+       permission_config_args: permission_profile_config_args(policy, workspace, git_dir, roots)
+     })}
+  end
+
+  defp local_session_policies(policies, _workspace, _owned_roots) do
+    {:ok, Map.merge(policies, %{permissions_profile: nil, permission_config_args: []})}
+  end
+
+  defp permission_profile_config_args(policy, workspace, git_dir, writable_roots) do
+    profile = @worktree_permissions_profile
+
+    filesystem_entries =
+      [
+        {":root", "read"},
+        {":tmpdir", tmp_access(policy, "excludeTmpdirEnvVar")},
+        {":slash_tmp", tmp_access(policy, "excludeSlashTmp")}
+      ] ++
+        Enum.map(writable_roots, &{&1, "write"}) ++
+        [
+          {Path.join(workspace, ".git"), "read"},
+          {Path.join(workspace, ".codex"), "read"},
+          {Path.join(workspace, ".agents"), "read"},
+          {git_dir, "write"}
+        ]
+
+    filesystem =
+      filesystem_entries
+      |> Enum.reject(fn {_path, access} -> is_nil(access) end)
+      |> Map.new()
+      |> Enum.sort_by(fn {path, _access} -> path end)
+      |> Enum.map_join(", ", fn {path, access} ->
+        ~s(#{inspect(path)}=#{inspect(access)})
+      end)
+
+    network_enabled = Map.get(policy, "networkAccess", false)
+
+    [
+      "--config",
+      ~s(default_permissions=#{inspect(profile)}),
+      "--config",
+      ~s(permissions.#{profile}.filesystem={#{filesystem}}),
+      "--config",
+      ~s(permissions.#{profile}.network.enabled=#{network_enabled})
+    ]
+  end
+
+  defp tmp_access(policy, key) do
+    if Map.get(policy, key, false), do: nil, else: "write"
   end
 
   defp apply_execution_settings(policies, %TaskExecutionSettings{} = settings) do
@@ -476,7 +569,8 @@ defmodule SymphonyElixir.Codex.AppServer do
            model: model,
            reasoning_effort: reasoning_effort,
            approval_policy: approval_policy,
-           thread_sandbox: thread_sandbox
+           thread_sandbox: thread_sandbox,
+           permissions_profile: permissions_profile
          },
          dynamic_tool_binding,
          effective_settings
@@ -484,10 +578,10 @@ defmodule SymphonyElixir.Codex.AppServer do
     params =
       %{
         "approvalPolicy" => approval_policy,
-        "sandbox" => thread_sandbox,
         "cwd" => workspace,
         "dynamicTools" => dynamic_tool_binding.tool_specs
       }
+      |> put_thread_permissions(permissions_profile, thread_sandbox)
       |> maybe_put_model(model)
       |> maybe_put_reasoning_effort(reasoning_effort)
 
@@ -530,7 +624,8 @@ defmodule SymphonyElixir.Codex.AppServer do
            reasoning_effort: reasoning_effort,
            approval_policy: approval_policy
          },
-         turn_sandbox_policy
+         turn_sandbox_policy,
+         permissions_profile
        ) do
     params =
       %{
@@ -538,9 +633,9 @@ defmodule SymphonyElixir.Codex.AppServer do
         "input" => input,
         "cwd" => workspace,
         "title" => "#{issue.identifier}: #{issue.title}",
-        "approvalPolicy" => approval_policy,
-        "sandboxPolicy" => turn_sandbox_policy
+        "approvalPolicy" => approval_policy
       }
+      |> put_turn_permissions(permissions_profile, turn_sandbox_policy)
       |> maybe_put("model", model)
       |> maybe_put("effort", reasoning_effort)
 
@@ -555,6 +650,20 @@ defmodule SymphonyElixir.Codex.AppServer do
       other -> other
     end
   end
+
+  defp put_thread_permissions(params, permissions_profile, _thread_sandbox)
+       when is_binary(permissions_profile),
+       do: Map.put(params, "permissions", permissions_profile)
+
+  defp put_thread_permissions(params, _permissions_profile, thread_sandbox),
+    do: Map.put(params, "sandbox", thread_sandbox)
+
+  defp put_turn_permissions(params, permissions_profile, _turn_sandbox_policy)
+       when is_binary(permissions_profile),
+       do: Map.put(params, "permissions", permissions_profile)
+
+  defp put_turn_permissions(params, _permissions_profile, turn_sandbox_policy),
+    do: Map.put(params, "sandboxPolicy", turn_sandbox_policy)
 
   defp maybe_put_model(params, nil), do: params
 
