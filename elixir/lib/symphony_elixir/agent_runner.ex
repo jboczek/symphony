@@ -373,7 +373,8 @@ defmodule SymphonyElixir.AgentRunner do
   defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do
     case issue_state_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        if active_issue_state?(refreshed_issue.state) and issue_routable?(refreshed_issue) do
+        if active_issue_state?(refreshed_issue.state) and issue_routable?(refreshed_issue) and
+             not session_boundary_reached?(issue.state, refreshed_issue.state) do
           {:continue, refreshed_issue}
         else
           {:done, refreshed_issue}
@@ -397,6 +398,21 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp active_issue_state?(_state_name), do: false
+
+  defp session_boundary_reached?(previous_state, current_state)
+       when is_binary(previous_state) and is_binary(current_state) do
+    previous_state = normalize_issue_state(previous_state)
+    current_state = normalize_issue_state(current_state)
+
+    Enum.any?(Config.settings!().agent.session_boundary_states, fn boundary_state ->
+      normalized_boundary = normalize_issue_state(boundary_state)
+
+      normalized_boundary == current_state or
+        (previous_state != current_state and normalized_boundary == previous_state)
+    end)
+  end
+
+  defp session_boundary_reached?(_previous_state, _current_state), do: false
 
   defp issue_routable?(%Issue{} = issue) do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)

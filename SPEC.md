@@ -459,6 +459,12 @@ Fields:
   - Default: empty map.
   - State keys are normalized (`trim + lowercase`) for lookup.
   - Invalid entries (non-positive or non-numeric) are ignored.
+- `session_boundary_states` (list of state names)
+  - Default: empty list.
+  - A worker whose issue is in a listed state runs at most one coding-agent turn per session. A
+    transition into or out of a listed state also ends the current worker session, allowing the
+    continuation retry to dispatch a fresh agent when the destination remains active.
+  - Blank or non-string entries fail configuration validation.
 
 #### 5.3.6 `codex` (object)
 
@@ -624,6 +630,7 @@ not require recognizing or validating extension fields unless that extension is 
 - `agent.max_turns`: integer, default `20`
 - `agent.max_retry_backoff_ms`: integer, default `300000` (5m)
 - `agent.max_concurrent_agents_by_state`: map of positive integers, default `{}`
+- `agent.session_boundary_states`: list of state names, default `[]`
 - `codex.command`: shell command string, default `codex app-server`
 - `codex.approval_policy`: Codex `AskForApproval` value, default implementation-defined
 - `codex.thread_sandbox`: Codex `SandboxMode` value, default implementation-defined
@@ -664,8 +671,11 @@ Important nuance:
 - A successful worker exit does not mean the issue is done forever.
 - The worker MAY continue through multiple back-to-back coding-agent turns before it exits.
 - After each normal turn completion, the worker re-checks the tracker issue state.
-- If the issue is still in an active state, the worker SHOULD start another turn on the same live
+- If the issue is still in an active state and the state transition did not cross a configured
+  `agent.session_boundary_states` value, the worker SHOULD start another turn on the same live
   coding-agent thread in the same workspace, up to `agent.max_turns`.
+- A turn that starts or ends in a configured session-boundary state SHOULD end the worker so the
+  orchestrator's continuation retry can start a fresh coding-agent session in the same workspace.
 - The first turn SHOULD use the full rendered task prompt.
 - Continuation turns SHOULD send only continuation guidance to the existing thread, not resend the
   original task prompt that is already present in thread history.
@@ -1975,9 +1985,14 @@ function run_agent_attempt(issue, attempt, orchestrator_channel):
     if refreshed_issue is empty:
       break
 
+    previous_state = issue.state
     issue = refreshed_issue[0]
 
     if issue.state is not active or not issue_routable(issue):
+      break
+
+    if issue.state is a session boundary or
+       transition(previous_state, issue.state) leaves config.agent.session_boundary_states:
       break
 
     if turn_number >= max_turns:

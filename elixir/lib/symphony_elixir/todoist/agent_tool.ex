@@ -26,7 +26,7 @@ defmodule SymphonyElixir.Todoist.AgentTool do
     "task_update" => ["operation", "task_id", "content", "description", "labels", "priority"],
     "task_create" => ["operation", "content", "description", "labels", "priority"],
     "comment_list" => ["operation", "task_id"],
-    "comment_create" => ["operation", "task_id", "content"],
+    "comment_create" => ["operation", "task_id", "content", "file_path", "file_name"],
     "comment_update" => ["operation", "comment_id", "content"],
     "workpad_upsert" => ["operation", "task_id", "content"]
   }
@@ -56,6 +56,14 @@ defmodule SymphonyElixir.Todoist.AgentTool do
         ]
       },
       "content" => %{"type" => "string"},
+      "file_path" => %{
+        "type" => "string",
+        "description" => "Relative path to a readable file in the task workspace."
+      },
+      "file_name" => %{
+        "type" => "string",
+        "description" => "Optional attachment name; only valid with file_path."
+      },
       "description" => %{"type" => "string"},
       "labels" => %{"type" => "array", "items" => %{"type" => "string"}},
       "priority" => %{"type" => "string", "enum" => ["p1", "p2", "p3", "p4"]}
@@ -78,7 +86,12 @@ defmodule SymphonyElixir.Todoist.AgentTool do
   @spec execute(String.t() | nil, term(), keyword()) :: map()
   def execute(@tool_name, arguments, opts) do
     tracker_settings = Keyword.get_lazy(opts, :tracker_settings, fn -> Config.settings!().tracker end)
-    client = Keyword.get(opts, :todoist_client, &call_cli/3)
+    workspace = Keyword.get(opts, :workspace)
+
+    client =
+      Keyword.get(opts, :todoist_client, fn operation, payload, settings ->
+        call_cli(operation, payload, settings, workspace)
+      end)
 
     with {:ok, operation, payload} <- normalize_arguments(arguments),
          {:ok, result} <- execute_operation(operation, payload, tracker_settings, client) do
@@ -150,8 +163,10 @@ defmodule SymphonyElixir.Todoist.AgentTool do
 
   defp operation_payload("comment_create", arguments) do
     with {:ok, task_id} <- required_string(arguments, "task_id"),
-         {:ok, content} <- required_string(arguments, "content") do
-      {:ok, %{task_id: task_id, content: content}}
+         {:ok, content} <- required_string(arguments, "content"),
+         {:ok, attachment} <- comment_attachment(arguments) do
+      payload = %{task_id: task_id, content: content}
+      {:ok, if(attachment, do: Map.merge(payload, attachment), else: payload)}
     end
   end
 
@@ -196,6 +211,44 @@ defmodule SymphonyElixir.Todoist.AgentTool do
         {:error, :invalid_todoist_arguments}
     end
   end
+
+  defp comment_attachment(arguments) do
+    has_path = Map.has_key?(arguments, "file_path")
+    has_name = Map.has_key?(arguments, "file_name")
+    file_path = Map.get(arguments, "file_path")
+    file_name = Map.get(arguments, "file_name")
+
+    cond do
+      not has_path and not has_name ->
+        {:ok, nil}
+
+      not has_path ->
+        {:error, :invalid_todoist_arguments}
+
+      not valid_attachment_path?(file_path) ->
+        {:error, :invalid_todoist_arguments}
+
+      has_name and not valid_attachment_name?(file_name) ->
+        {:error, :invalid_todoist_arguments}
+
+      true ->
+        attachment = %{file_path: file_path}
+        {:ok, if(has_name, do: Map.put(attachment, :file_name, file_name), else: attachment)}
+    end
+  end
+
+  defp valid_attachment_path?(path) when is_binary(path) do
+    String.trim(path) != "" and Path.type(path) == :relative and
+      not Enum.any?(Path.split(path), &(&1 == ".."))
+  end
+
+  defp valid_attachment_path?(_path), do: false
+
+  defp valid_attachment_name?(name) when is_binary(name) do
+    String.trim(name) != "" and Path.basename(name) == name
+  end
+
+  defp valid_attachment_name?(_name), do: false
 
   defp execute_operation(:workpad_upsert, payload, tracker_settings, client) do
     upsert_workpad(payload, tracker_settings, client)
@@ -245,24 +298,40 @@ defmodule SymphonyElixir.Todoist.AgentTool do
 
   defp workpad_content?(_content), do: false
 
-  defp call_cli(:task_get, %{task_id: task_id}, settings), do: cli_module().get_task(settings, task_id)
+  defp call_cli(:task_get, %{task_id: task_id}, settings, _workspace),
+    do: cli_module().get_task(settings, task_id)
 
-  defp call_cli(:task_move, %{task_id: task_id, section: section}, settings),
+  defp call_cli(:task_move, %{task_id: task_id, section: section}, settings, _workspace),
     do: cli_module().move_task(settings, task_id, section)
 
-  defp call_cli(:task_update, %{task_id: task_id, changes: changes}, settings),
+  defp call_cli(:task_update, %{task_id: task_id, changes: changes}, settings, _workspace),
     do: cli_module().update_task(settings, task_id, changes)
 
-  defp call_cli(:task_create, %{content: content, attributes: attributes}, settings),
+  defp call_cli(:task_create, %{content: content, attributes: attributes}, settings, _workspace),
     do: cli_module().create_task(settings, content, attributes)
 
-  defp call_cli(:comment_list, %{task_id: task_id}, settings),
+  defp call_cli(:comment_list, %{task_id: task_id}, settings, _workspace),
     do: cli_module().list_comments(settings, task_id)
 
-  defp call_cli(:comment_create, %{task_id: task_id, content: content}, settings),
+  defp call_cli(
+         :comment_create,
+         %{task_id: task_id, content: content, file_path: file_path} = payload,
+         settings,
+         workspace
+       ),
+       do:
+         cli_module().create_comment(
+           settings,
+           task_id,
+           content,
+           %{path: file_path, file_name: Map.get(payload, :file_name)},
+           cwd: workspace
+         )
+
+  defp call_cli(:comment_create, %{task_id: task_id, content: content}, settings, _workspace),
     do: cli_module().create_comment(settings, task_id, content)
 
-  defp call_cli(:comment_update, %{comment_id: comment_id, content: content}, settings),
+  defp call_cli(:comment_update, %{comment_id: comment_id, content: content}, settings, _workspace),
     do: cli_module().update_comment(settings, comment_id, content)
 
   defp cli_module do
@@ -315,6 +384,7 @@ defmodule SymphonyElixir.Todoist.AgentTool do
   defp error_code(_reason), do: "todoist_operation_failed"
 
   defp error_message(:invalid_todoist_arguments), do: "Invalid arguments for the selected Todoist operation."
+  defp error_message(:invalid_todoist_comment_attachment), do: "Todoist comment attachment is invalid or unreadable."
   defp error_message(:invalid_todoist_workpad), do: "Workpad content must begin with `## Codex Workpad`."
   defp error_message(:multiple_todoist_workpads), do: "Multiple Codex Workpad comments exist; refusing to choose one."
   defp error_message(_reason), do: "Todoist operation failed without exposing CLI diagnostics."

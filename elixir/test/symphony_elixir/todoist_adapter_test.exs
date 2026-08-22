@@ -169,6 +169,74 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
     assert {:ok, %{"id" => "checkpoint-new"}} = Adapter.latest_checkpoint_comment(issue)
   end
 
+  test "routes a fresh verification report by verdict and ignores stale reports" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "todoist")
+    started_at = ~U[2026-08-21 08:00:00Z]
+    verify_task = task("verify-task") |> Map.put("sectionId", "section-verify")
+    verify_issue = Adapter.normalize_issue_for_test(verify_task, scope())
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, [verify_task])
+
+    Application.put_env(:symphony_elixir, :todoist_test_comments, [
+      %{
+        "id" => "stale-pass",
+        "content" => "# Verification report — old\n\n- Verdict: Pass",
+        "postedAt" => "2026-08-21T07:59:59Z"
+      }
+    ])
+
+    assert {:error, :verification_report_missing} =
+             Adapter.finalize_agent_run(verify_issue, started_at)
+
+    refute_received {:todoist_move_task, "verify-task", _section}
+
+    for {verdict, section} <- [
+          {"Pass", "HumanReview"},
+          {"Fail", "Rework"},
+          {"Inconclusive", "Rework"}
+        ] do
+      Application.put_env(:symphony_elixir, :todoist_test_comments, [
+        %{
+          "id" => "report-#{verdict}",
+          "content" => "# Verification report — verify-task\n\n- Verdict: #{verdict}",
+          "postedAt" => "2026-08-21T08:00:01Z"
+        }
+      ])
+
+      assert :ok = Tracker.finalize_agent_run(verify_issue, started_at)
+      assert_received {:todoist_move_task, "verify-task", ^section}
+    end
+
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, [
+      %{verify_task | "sectionId" => "section-humanreview"}
+    ])
+
+    assert {:error, :verification_state_changed} =
+             Adapter.finalize_agent_run(verify_issue, started_at)
+
+    refute_received {:todoist_move_task, "verify-task", _section}
+
+    assert :ok = Adapter.finalize_agent_run(%{verify_issue | state: "InProgress"}, started_at)
+
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, [])
+
+    assert {:error, :verification_task_missing} =
+             Adapter.finalize_agent_run(verify_issue, started_at)
+
+    Application.put_env(:symphony_elixir, :todoist_test_tasks, [verify_task])
+
+    Application.put_env(:symphony_elixir, :todoist_test_comments, [
+      42,
+      %{
+        "id" => "invalid-verdict",
+        "content" => "# Verification report — verify-task\n\n- Verdict: Unknown",
+        "postedAt" => "2026-08-21T08:00:01Z"
+      }
+    ])
+
+    assert {:error, :invalid_verification_report_verdict} =
+             Adapter.finalize_agent_run(verify_issue, started_at)
+  end
+
   test "orchestrator blocks malformed task configuration before starting a worker" do
     malformed_task =
       task("malformed-config")
@@ -288,7 +356,17 @@ defmodule SymphonyElixir.Todoist.AdapterTest do
 
   @spec scope() :: map()
   def scope do
-    section_names = ["Backlog", "Todo", "InProgress", "Blocked", "HumanReview", "Rework", "Merging", "Done"]
+    section_names = [
+      "Backlog",
+      "Todo",
+      "InProgress",
+      "Verify",
+      "Blocked",
+      "HumanReview",
+      "Rework",
+      "Merging",
+      "Done"
+    ]
 
     sections_by_name =
       Map.new(section_names, fn name ->

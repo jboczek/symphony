@@ -111,9 +111,15 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
 
     assert {:error, {:invalid_task_execution_settings, :unterminated_front_matter}} =
              TaskExecutionSettings.parse("```\n---\nsymphony:\n  repo: example\n---\nTask")
+
+    assert {:error, {:invalid_task_execution_settings, :unterminated_front_matter}} =
+             TaskExecutionSettings.parse("```\n---\nsymphony:\n  repo: example\n---")
+
+    assert {:error, {:invalid_task_execution_settings, :unterminated_front_matter}} =
+             TaskExecutionSettings.parse("```\n---\nsymphony:\n  repo: example")
   end
 
-  test "rejects invalid shapes, unknown keys, blank values, and traversal repositories" do
+  test "rejects invalid shapes, unknown keys, blank values, and unsafe repository paths" do
     invalid_descriptions = [
       "---\n- item\n---\nTask",
       "---\nsymphony: nope\n---\nTask",
@@ -123,9 +129,10 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
       "---\nsymphony:\n  task_id: 0\n---\nTask",
       "---\nsymphony:\n  task_id: ABC-123\n---\nTask",
       "---\nsymphony:\n  repo: ../secrets\n---\nTask",
-      "---\nsymphony:\n  repo: nested/repo\n---\nTask",
       "---\nsymphony:\n  repo: .\n---\nTask",
-      "---\nsymphony:\n  repo: ..\n---\nTask"
+      "---\nsymphony:\n  repo: ..\n---\nTask",
+      "---\nsymphony:\n  repo: /absolute/repo\n---\nTask",
+      "---\nsymphony:\n  repo: nested//repo\n---\nTask"
     ]
 
     assert Enum.all?(invalid_descriptions, fn description ->
@@ -133,6 +140,8 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
            end)
 
     refute TaskExecutionSettings.valid_repository_name?(42)
+
+    assert TaskExecutionSettings.valid_repository_name?("git/cse.repo")
   end
 
   test "front matter without Symphony settings preserves existing behavior" do
@@ -141,9 +150,9 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
     assert {:ok, %TaskExecutionSettings{}, ^description} = TaskExecutionSettings.parse(description)
   end
 
-  test "resolves only an exact direct-child Git repository" do
+  test "resolves nested Git repositories without leaving the configured root" do
     root = tmp_path("repository-resolver")
-    repository = Path.join(root, "cse.tools.prompts")
+    repository = Path.join(root, "git/cse.tools.prompts")
     non_repository = Path.join(root, "notes")
 
     try do
@@ -151,7 +160,7 @@ defmodule SymphonyElixir.TaskExecutionSettingsTest do
       File.mkdir_p!(non_repository)
       assert {_output, 0} = System.cmd("git", ["-C", repository, "init", "-b", "main"])
 
-      assert {:ok, resolved} = RepositoryResolver.resolve("cse.tools.prompts", root)
+      assert {:ok, resolved} = RepositoryResolver.resolve("git/cse.tools.prompts", root)
       assert {:ok, expected_repository} = SymphonyElixir.PathSafety.canonicalize(repository)
       assert resolved == expected_repository
 

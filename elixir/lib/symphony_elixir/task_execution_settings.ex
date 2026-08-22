@@ -33,9 +33,15 @@ defmodule SymphonyElixir.TaskExecutionSettings do
 
   @spec valid_repository_name?(term()) :: boolean()
   def valid_repository_name?(name) when is_binary(name) do
-    name not in ["", ".", ".."] and
+    name != "" and
       String.trim(name) == name and
-      String.match?(name, ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/)
+      Path.type(name) == :relative and
+      name
+      |> String.split("/", trim: false)
+      |> Enum.all?(fn segment ->
+        segment not in ["", ".", ".."] and
+          String.match?(segment, ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/)
+      end)
   end
 
   def valid_repository_name?(_name), do: false

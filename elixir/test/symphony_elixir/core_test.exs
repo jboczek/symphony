@@ -18,6 +18,7 @@ defmodule SymphonyElixir.CoreTest do
     assert config.tracker.terminal_states == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     assert config.tracker.assignee == nil
     assert config.agent.max_turns == 20
+    assert config.agent.session_boundary_states == []
 
     write_workflow_file!(Workflow.workflow_file_path(), poll_interval_ms: "invalid")
 
@@ -33,6 +34,17 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), max_turns: 5)
     assert Config.settings!().agent.max_turns == 5
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["In Progress", "Verify", "Rework"],
+      session_boundary_states: ["Verify"]
+    )
+
+    assert Config.settings!().agent.session_boundary_states == ["Verify"]
+
+    write_workflow_file!(Workflow.workflow_file_path(), session_boundary_states: [""])
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "agent.session_boundary_states"
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_active_states: "Todo,  Review,")
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
@@ -1043,6 +1055,44 @@ defmodule SymphonyElixir.CoreTest do
 
     assert {:done, ^refreshed_issue} =
              AgentRunner.continue_with_issue_for_test(issue, fetcher)
+  end
+
+  test "agent runner ends the session when crossing a configured state boundary" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["In Progress", "Verify", "Rework"],
+      session_boundary_states: ["Verify"]
+    )
+
+    implementation_issue = %Issue{
+      id: "issue-verification-boundary",
+      identifier: "MT-VERIFY",
+      title: "Verify independently",
+      state: "In Progress",
+      labels: [],
+      dispatchable: true
+    }
+
+    verify_issue = %{implementation_issue | state: "Verify"}
+
+    assert {:done, ^verify_issue} =
+             AgentRunner.continue_with_issue_for_test(
+               implementation_issue,
+               fn ["issue-verification-boundary"] -> {:ok, [verify_issue]} end
+             )
+
+    rework_issue = %{verify_issue | state: "Rework"}
+
+    assert {:done, ^rework_issue} =
+             AgentRunner.continue_with_issue_for_test(
+               verify_issue,
+               fn ["issue-verification-boundary"] -> {:ok, [rework_issue]} end
+             )
+
+    assert {:done, ^verify_issue} =
+             AgentRunner.continue_with_issue_for_test(
+               verify_issue,
+               fn ["issue-verification-boundary"] -> {:ok, [verify_issue]} end
+             )
   end
 
   test "normal worker exit schedules active-state continuation retry" do

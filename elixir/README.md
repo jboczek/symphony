@@ -141,6 +141,7 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 20
+  session_boundary_states: []
 codex:
   command: codex app-server
 context_management:
@@ -181,6 +182,9 @@ Notes:
   by the Codex turn sandbox.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `agent.session_boundary_states` defaults to `[]`. A worker in one of these active states runs one
+  turn per Codex session; crossing into or out of one also ends the current session. The normal
+  continuation retry starts a fresh agent when the destination remains active.
 - `repositories.root` is the parent directory for Todoist-selected local repositories. It defaults
   to `/Users/your-username/git`; task values resolve by exact direct-child name only.
 - `context_management.enabled` defaults to `true`; `checkpoint_threshold` defaults to `0.70` and
@@ -314,7 +318,7 @@ codex:
   adapter uses the authenticated official `td` executable; no Todoist token belongs in the workflow
   or the Codex environment.
 - Startup validation: the project name must resolve uniquely. Its `Backlog`, `Todo`, `InProgress`,
-  `Blocked`, `HumanReview`, `Rework`, `Merging`, and `Done` sections must already exist exactly
+  `Verify`, `Blocked`, `HumanReview`, `Rework`, `Merging`, and `Done` sections must already exist exactly
   once. Startup never creates, renames, archives, or deletes project structure. `Blocked` is not an
   active dispatch state; moving a task back to `InProgress`, `Rework`, or another configured active
   section makes it eligible again.
@@ -353,15 +357,20 @@ codex:
   `thread/compact/start` to finish, and resumes the same thread from the newest checkpoint. A
   missing checkpoint prevents compaction; compaction failure leaves the durable comment intact.
 - Tool: the structured `todoist` tool exposes only task get/move/update/create, comment
-  list/create/update, and persistent Workpad upsert. It does not expose arbitrary CLI, completion,
-  deletion, archive, project, or section operations. `workpad_upsert` reuses the one comment that
-  begins exactly `## Codex Workpad`.
+  list/create/update, and persistent Workpad upsert. `comment_create` can also attach a readable
+  file from the task workspace using `file_path` and optional `file_name`. It does not expose
+  arbitrary CLI, completion, deletion, archive, project, or section operations. `workpad_upsert`
+  reuses the one comment that begins exactly `## Codex Workpad`.
 - Errors: missing executable, unauthenticated CLI, timeouts, non-zero exits, malformed structured
   output, ambiguous/missing scope, missing sections, and cross-project access return structured
   failures. Tool-facing failures do not include CLI diagnostics or credentials.
+- Verification handoff: `Verify` is active and configured as a session boundary. Implementation
+  and rework agents move completed work there and stop. A fresh agent must run the repository
+  `verify` skill, which posts a new report comment. Symphony routes `Pass` to `HumanReview` and
+  `Fail`/`Inconclusive` to `Rework`; a missing or stale report leaves the task in `Verify`.
 - Runnable profile: `WORKFLOW.todoist.md` uses GPT-5.6 Luna at `xhigh`, approval policy `never`, a
   workspace-write turn sandbox with network access, automatic 70% context checkpointing, and the
-  `_agents` section lifecycle including `Blocked`.
+  `_agents` section lifecycle including `Verify` and `Blocked`.
 
 ### GitLab adapter
 

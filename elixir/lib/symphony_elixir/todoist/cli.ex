@@ -14,6 +14,7 @@ defmodule SymphonyElixir.Todoist.CLI do
     "Backlog",
     "Todo",
     "InProgress",
+    "Verify",
     "Blocked",
     "HumanReview",
     "Rework",
@@ -29,6 +30,7 @@ defmodule SymphonyElixir.Todoist.CLI do
           sections_by_id: %{String.t() => section()}
         }
   @type runner :: ([String.t()] -> {:ok, String.t()} | {:error, term()})
+  @type attachment :: %{path: String.t(), file_name: String.t() | nil}
 
   @spec validate_settings(map()) :: :ok | {:error, term()}
   def validate_settings(tracker_settings) do
@@ -88,8 +90,20 @@ defmodule SymphonyElixir.Todoist.CLI do
 
   @spec create_comment(map(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def create_comment(tracker_settings, task_id, content) do
+    create_comment(tracker_settings, task_id, content, nil)
+  end
+
+  @spec create_comment(map(), String.t(), String.t(), attachment() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def create_comment(tracker_settings, task_id, content, attachment) do
+    create_comment(tracker_settings, task_id, content, attachment, [])
+  end
+
+  @spec create_comment(map(), String.t(), String.t(), attachment() | nil, keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def create_comment(tracker_settings, task_id, content, attachment, opts) do
     with {:ok, scope} <- current_scope(tracker_settings) do
-      create_comment(scope, task_id, content, &run/1)
+      create_comment(scope, task_id, content, attachment, runner_for(opts), opts)
     end
   end
 
@@ -127,6 +141,20 @@ defmodule SymphonyElixir.Todoist.CLI do
           {:ok, map()} | {:error, term()}
   def update_comment_for_test(scope, comment_id, content, runner) do
     update_comment(scope, comment_id, content, runner)
+  end
+
+  @doc false
+  @spec create_comment_for_test(scope(), String.t(), String.t(), attachment() | nil, runner()) ::
+          {:ok, map()} | {:error, term()}
+  def create_comment_for_test(scope, task_id, content, attachment, runner) do
+    create_comment(scope, task_id, content, attachment, runner, [])
+  end
+
+  @doc false
+  @spec create_comment_for_test(scope(), String.t(), String.t(), attachment() | nil, runner(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def create_comment_for_test(scope, task_id, content, attachment, runner, opts) do
+    create_comment(scope, task_id, content, attachment, runner, opts)
   end
 
   @doc false
@@ -436,13 +464,15 @@ defmodule SymphonyElixir.Todoist.CLI do
 
   defp validate_comments(_comments, _task_id), do: {:error, :todoist_invalid_comment_payload}
 
-  defp create_comment(scope, task_id, content, runner) when is_binary(content) do
+  defp create_comment(scope, task_id, content, attachment, runner, opts) when is_binary(content) do
     with {:ok, task_ref} <- safe_id_ref(task_id),
+         {:ok, attachment_args} <- attachment_args(attachment, Keyword.get(opts, :cwd)),
          {:ok, _task} <- get_task(scope, task_id, runner),
          {:ok, comment} <-
            run_decoded(
              runner,
-             ["--no-spinner", "comment", "add", task_ref, "--content", content, "--json"],
+             ["--no-spinner", "comment", "add", task_ref, "--content", content] ++
+               attachment_args ++ ["--json"],
              :json
            ),
          :ok <- validate_comment(comment, task_id) do
@@ -450,7 +480,60 @@ defmodule SymphonyElixir.Todoist.CLI do
     end
   end
 
-  defp create_comment(_scope, _task_id, _content, _runner), do: {:error, :invalid_todoist_comment_content}
+  defp create_comment(_scope, _task_id, _content, _attachment, _runner, _opts),
+    do: {:error, :invalid_todoist_comment_content}
+
+  defp attachment_args(nil, _cwd), do: {:ok, []}
+
+  defp attachment_args(%{path: path, file_name: file_name}, cwd) do
+    with {:ok, path} <- validate_attachment_path(path, cwd),
+         {:ok, file_name_args} <- attachment_file_name_args(file_name) do
+      {:ok, ["--file", path] ++ file_name_args}
+    end
+  end
+
+  defp attachment_args(_attachment, _cwd), do: {:error, :invalid_todoist_comment_attachment}
+
+  defp validate_attachment_path(path, cwd) when is_binary(path) do
+    segments = Path.split(path)
+    workspace = if is_binary(cwd), do: Path.expand(cwd), else: File.cwd!()
+    expanded_path = Path.expand(path, workspace)
+    relative_path = Path.relative_to(expanded_path, workspace)
+
+    cond do
+      String.trim(path) == "" ->
+        {:error, :invalid_todoist_comment_attachment}
+
+      Path.type(path) != :relative ->
+        {:error, :invalid_todoist_comment_attachment}
+
+      Enum.any?(segments, &(&1 == "..")) ->
+        {:error, :invalid_todoist_comment_attachment}
+
+      relative_path == ".." or String.starts_with?(relative_path, "../") ->
+        {:error, :invalid_todoist_comment_attachment}
+
+      not File.regular?(expanded_path) ->
+        {:error, :invalid_todoist_comment_attachment}
+
+      true ->
+        {:ok, path}
+    end
+  end
+
+  defp validate_attachment_path(_path, _cwd), do: {:error, :invalid_todoist_comment_attachment}
+
+  defp attachment_file_name_args(nil), do: {:ok, []}
+
+  defp attachment_file_name_args(file_name) when is_binary(file_name) do
+    if String.trim(file_name) != "" and Path.basename(file_name) == file_name do
+      {:ok, ["--file-name", file_name]}
+    else
+      {:error, :invalid_todoist_comment_attachment}
+    end
+  end
+
+  defp attachment_file_name_args(_file_name), do: {:error, :invalid_todoist_comment_attachment}
 
   defp update_comment(scope, comment_id, content, runner) when is_binary(content) do
     with {:ok, comment_ref} <- safe_id_ref(comment_id),
@@ -595,20 +678,21 @@ defmodule SymphonyElixir.Todoist.CLI do
     executable_finder = Keyword.get(opts, :executable_finder, &System.find_executable/1)
     system_runner = Keyword.get(opts, :system_runner, &System.cmd/3)
     timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
+    cwd = Keyword.get(opts, :cwd)
 
     case executable_finder.("td") do
       executable when is_binary(executable) ->
-        run_executable(executable, args, timeout_ms, system_runner)
+        run_executable(executable, args, timeout_ms, system_runner, cwd)
 
       _ ->
         {:error, :todoist_cli_missing}
     end
   end
 
-  defp run_executable(executable, args, timeout_ms, system_runner) do
+  defp run_executable(executable, args, timeout_ms, system_runner, cwd) do
     task =
       Task.async(fn ->
-        system_runner.(executable, args, stderr_to_stdout: true)
+        system_runner.(executable, args, command_options(cwd))
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -626,6 +710,16 @@ defmodule SymphonyElixir.Todoist.CLI do
         {:error, :todoist_cli_timeout}
     end
   end
+
+  defp runner_for(opts) do
+    case Keyword.get(opts, :cwd) do
+      cwd when is_binary(cwd) -> fn args -> run(args, cwd: cwd) end
+      _ -> &run/1
+    end
+  end
+
+  defp command_options(nil), do: [stderr_to_stdout: true]
+  defp command_options(cwd), do: [stderr_to_stdout: true, cd: cwd]
 
   defp diagnostic(output) do
     output

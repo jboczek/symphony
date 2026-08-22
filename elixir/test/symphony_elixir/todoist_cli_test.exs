@@ -9,7 +9,17 @@ defmodule SymphonyElixir.Todoist.CLITest do
     "isArchived" => false,
     "isDeleted" => false
   }
-  @section_names ["Backlog", "Todo", "InProgress", "Blocked", "HumanReview", "Rework", "Merging", "Done"]
+  @section_names [
+    "Backlog",
+    "Todo",
+    "InProgress",
+    "Verify",
+    "Blocked",
+    "HumanReview",
+    "Rework",
+    "Merging",
+    "Done"
+  ]
 
   setup do
     CLI.clear_scope_for_test()
@@ -29,6 +39,7 @@ defmodule SymphonyElixir.Todoist.CLITest do
     assert scope.project_id == "project-1"
     assert scope.project_name == "_agents"
     assert scope.sections_by_name["Todo"].id == "section-todo"
+    assert scope.sections_by_name["Verify"].id == "section-verify"
     assert scope.sections_by_name["Blocked"].id == "section-blocked"
     assert scope.sections_by_name["HumanReview"].project_id == "project-1"
 
@@ -269,6 +280,117 @@ defmodule SymphonyElixir.Todoist.CLITest do
              CLI.move_task_for_test(scope, "task-1", "Elsewhere", fn _args ->
                flunk("unknown section must fail before task lookup")
              end)
+  end
+
+  test "creates comments with a readable relative attachment" do
+    scope = scope()
+    path = "todoist-attachment-#{System.unique_integer([:positive])}.png"
+    File.write!(path, "png")
+    on_exit(fn -> File.rm(path) end)
+
+    runner = fn args ->
+      case args do
+        ["--no-spinner", "task", "view", "id:task-1", "--json", "--full"] ->
+          {:ok, Jason.encode!(task("task-1"))}
+
+        [
+          "--no-spinner",
+          "comment",
+          "add",
+          "id:task-1",
+          "--content",
+          "Screenshot",
+          "--file",
+          ^path,
+          "--file-name",
+          "list.png",
+          "--json"
+        ] ->
+          {:ok, Jason.encode!(%{"id" => "comment-1", "taskId" => "task-1"})}
+
+        other ->
+          flunk("unexpected td args: #{inspect(other)}")
+      end
+    end
+
+    assert {:ok, %{"id" => "comment-1"}} =
+             CLI.create_comment_for_test(
+               scope,
+               "task-1",
+               "Screenshot",
+               %{path: path, file_name: "list.png"},
+               runner
+             )
+  end
+
+  test "resolves attachments from the Codex workspace and runs td there" do
+    workspace = Path.join(System.tmp_dir!(), "todoist-workspace-#{System.unique_integer([:positive])}")
+    relative_path = "docs/temp/tui-list.png"
+    attachment_path = Path.join(workspace, relative_path)
+    File.mkdir_p!(Path.dirname(attachment_path))
+    File.write!(attachment_path, "png")
+
+    on_exit(fn -> File.rm_rf(workspace) end)
+
+    assert {:ok, %{"id" => "comment-1"}} =
+             CLI.create_comment_for_test(
+               scope(),
+               "task-1",
+               "Screenshot",
+               %{path: relative_path, file_name: "tui-list.png"},
+               fn args ->
+                 case args do
+                   ["--no-spinner", "task", "view", "id:task-1", "--json", "--full"] ->
+                     {:ok, Jason.encode!(task("task-1"))}
+
+                   [
+                     "--no-spinner",
+                     "comment",
+                     "add",
+                     "id:task-1",
+                     "--content",
+                     "Screenshot",
+                     "--file",
+                     ^relative_path,
+                     "--file-name",
+                     "tui-list.png",
+                     "--json"
+                   ] ->
+                     {:ok, Jason.encode!(%{"id" => "comment-1", "taskId" => "task-1"})}
+
+                   other ->
+                     flunk("unexpected td args: #{inspect(other)}")
+                 end
+               end,
+               cwd: workspace
+             )
+
+    assert {:ok, "ok"} =
+             CLI.run_for_test(
+               ["comment", "add"],
+               cwd: workspace,
+               executable_finder: fn "td" -> "/usr/local/bin/td" end,
+               system_runner: fn "/usr/local/bin/td", ["comment", "add"], opts ->
+                 assert opts[:cd] == workspace
+                 {"ok", 0}
+               end
+             )
+  end
+
+  test "rejects unsafe or unreadable comment attachments before mutation" do
+    scope = scope()
+
+    for attachment <- [
+          %{path: "/tmp/list.png", file_name: nil},
+          %{path: "../list.png", file_name: nil},
+          %{path: "missing/list.png", file_name: "list.png"},
+          %{path: "list.png", file_name: "nested/list.png"}
+        ] do
+      assert {:error, :invalid_todoist_comment_attachment} =
+               CLI.create_comment_for_test(scope, "task-1", "Screenshot", attachment, fn _args ->
+                 flunk("unsafe attachment must fail before invoking td")
+               end)
+    end
   end
 
   defp scope_runner(projects \\ [@project], project_sections \\ sections()) do

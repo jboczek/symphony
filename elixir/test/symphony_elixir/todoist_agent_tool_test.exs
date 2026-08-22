@@ -22,6 +22,10 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
     @spec create_comment(map(), String.t(), String.t()) :: {:ok, map()}
     def create_comment(settings, task_id, content), do: result(:create_comment, [settings, task_id, content])
 
+    @spec create_comment(map(), String.t(), String.t(), map(), keyword()) :: {:ok, map()}
+    def create_comment(settings, task_id, content, attachment, opts),
+      do: result(:create_comment_with_attachment, [settings, task_id, content, attachment, opts])
+
     @spec update_comment(map(), String.t(), String.t()) :: {:ok, map()}
     def update_comment(settings, comment_id, content),
       do: result(:update_comment, [settings, comment_id, content])
@@ -164,6 +168,32 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
     assert_received {:todoist_client, :comment_list, %{task_id: "task-1"}, @tracker_settings}
   end
 
+  test "creates a comment with a workspace-relative attachment" do
+    test_pid = self()
+
+    client = fn :comment_create, %{task_id: "task-1", content: "Screenshot", file_path: "artifacts/list.png", file_name: "list.png"}, @tracker_settings = settings ->
+      send(test_pid, {:attached_comment, settings})
+      {:ok, %{"id" => "comment-1", "taskId" => "task-1", "attachment" => "list.png"}}
+    end
+
+    response =
+      AgentTool.execute(
+        "todoist",
+        %{
+          "operation" => "comment_create",
+          "task_id" => "task-1",
+          "content" => "Screenshot",
+          "file_path" => "artifacts/list.png",
+          "file_name" => "list.png"
+        },
+        tracker_settings: @tracker_settings,
+        todoist_client: client
+      )
+
+    assert response["success"]
+    assert_received {:attached_comment, @tracker_settings}
+  end
+
   test "default client dispatches every allowlisted operation through the typed CLI module" do
     previous_cli = Application.get_env(:symphony_elixir, :todoist_cli_module)
     previous_pid = Application.get_env(:symphony_elixir, :todoist_tool_test_pid)
@@ -196,6 +226,40 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
     assert_received {:list_comments, [@tracker_settings, "task-1"]}
     assert_received {:create_comment, [@tracker_settings, "task-1", "Created"]}
     assert_received {:update_comment, [@tracker_settings, "comment-1", "Updated"]}
+  end
+
+  test "passes the Codex workspace to Todoist attachment creation" do
+    previous_cli = Application.get_env(:symphony_elixir, :todoist_cli_module)
+    previous_pid = Application.get_env(:symphony_elixir, :todoist_tool_test_pid)
+    Application.put_env(:symphony_elixir, :todoist_cli_module, FakeCLI)
+    Application.put_env(:symphony_elixir, :todoist_tool_test_pid, self())
+
+    on_exit(fn ->
+      restore_app_env(:todoist_cli_module, previous_cli)
+      restore_app_env(:todoist_tool_test_pid, previous_pid)
+    end)
+
+    assert AgentTool.execute(
+             "todoist",
+             %{
+               "operation" => "comment_create",
+               "task_id" => "task-1",
+               "content" => "Screenshot",
+               "file_path" => "docs/temp/tui-list.png",
+               "file_name" => "tui-list.png"
+             },
+             tracker_settings: @tracker_settings,
+             workspace: "/tmp/task-workspace"
+           )["success"]
+
+    assert_received {:create_comment_with_attachment,
+                     [
+                       @tracker_settings,
+                       "task-1",
+                       "Screenshot",
+                       %{path: "docs/temp/tui-list.png", file_name: "tui-list.png"},
+                       [cwd: "/tmp/task-workspace"]
+                     ]}
   end
 
   test "discovers and updates the same Workpad comment" do
@@ -326,6 +390,24 @@ defmodule SymphonyElixir.Todoist.AgentToolTest do
           %{"operation" => "task_update", "task_id" => "task-1", "priority" => 1},
           %{"operation" => "task_create", "content" => "Nope", "project_id" => "other"},
           %{"operation" => "comment_update", "comment_id" => "comment-1"},
+          %{
+            "operation" => "comment_create",
+            "task_id" => "task-1",
+            "content" => "Nope",
+            "file_path" => "/tmp/list.png"
+          },
+          %{
+            "operation" => "comment_create",
+            "task_id" => "task-1",
+            "content" => "Nope",
+            "file_path" => "../list.png"
+          },
+          %{
+            "operation" => "comment_create",
+            "task_id" => "task-1",
+            "content" => "Nope",
+            "file_name" => "list.png"
+          },
           %{"operation" => "workpad_upsert", "task_id" => "task-1"},
           "not-an-object"
         ] do
