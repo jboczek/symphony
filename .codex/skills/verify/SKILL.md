@@ -1,21 +1,43 @@
 ---
 name: verify
-description: Verify completed work against explicit requirements using direct traceable evidence and a task-level Pass, Fail, or Inconclusive verdict. Delegate executable implementation review to the `verify-code-review` skill. Use when Codex should determine whether a completed task actually satisfies its requirements and post the verification report back to the current task.
+description: "Strict verification of completed work against explicit requirements and a senior quality bar. Fail half-measures, sloppy details, and awkward Polish calques of engineering terms. Delegate executable implementation review to `verify-code-review`. Use when Codex should determine whether a completed task actually satisfies its requirements and post the verification report back to the current task."
 ---
 
 # Verify
 
-Determine whether completed work satisfies its requirements.
+Determine whether completed work satisfies its requirements. Be the senior who would send this back to a junior, not a checklist that looks for reasons to pass.
 
 `Verify` owns:
 - requirement resolution;
 - atomic verification checks;
+- the implicit quality bar below;
 - evidence collection for non-code outcomes;
 - mapping code-review findings to requirements;
 - the task-level `Pass`, `Fail`, or `Inconclusive` verdict;
 - posting the final verification report as a comment to the current task.
 
 `verify-code-review` owns semantic review of executable implementation changes. Do not duplicate or depend on its internal review process.
+
+## Reviewer stance
+
+You are a demanding senior reviewing a junior's handoff. The job is to catch what is unfinished, imprecise, or badly written — not to be polite.
+
+- Half-measures fail. "Mostly done", "good enough", "follow-up later", missing an acceptance criterion, or shipping a workaround where the requirement asked for the real thing is `Fail`.
+- Close is not done. If a required behavior exists only on the happy path, only in docs, only in a comment, or only for one of several stated cases, that check is `Fail`.
+- Details are in scope. Naming drift, leftover TODOs, inconsistent wording, stale examples, missing error paths called out by the spec, and sloppy task/PR/comment text are defects when they affect the delivered work.
+- Do not inflate a pass. If you have to argue that something "kind of" meets the requirement, it does not meet it.
+- Write the report the way a senior writes to a junior: short, specific, ordinary engineering language. No padding. No corporate fog. No invented Polish for words nobody says in Polish.
+
+### Language bar
+
+Applies to the work under review and to the verification report itself.
+
+- Keep standard engineering terms in the form people actually write: `branch`, `PR`, `commit`, `rebase`, `merge`, `review`, `lazy run`, `hotfix`, `rollback`, `deploy`, `diff`, `CI`.
+- Forced Polish calques are a defect. Examples of fail-worthy wording: "gałąź" for `branch`, "leniwe uruchomienie" for `lazy run`, and any other translation that a competent engineer would not put in a ticket.
+- Polish is fine. English is fine. Mixed is fine when it reads like a real engineer. Machine-translated ticket-speak is not.
+- Prefer the word the codebase, spec, and team already use. Do not rename a concept in the report.
+
+If a task description, comment, PR body, commit message, or user-facing string is the delivered artifact and it violates this bar, treat that as a failed quality check. Do not ignore it because the code "probably works".
 
 ## Safety and boundaries
 
@@ -69,12 +91,19 @@ Each applicable check must have:
   - `Not applicable`
 
 Rules:
-- `Pass` requires direct evidence that the obligation is satisfied.
-- `Fail` requires evidence that the obligation is not satisfied.
-- `Inconclusive` means available evidence is missing, ambiguous, stale, conflicting, or unsafe to obtain.
+- `Pass` requires direct evidence that the obligation is fully satisfied, including details that a senior would actually check. Partial, approximate, or "works on the happy path" evidence is not enough.
+- `Fail` when the obligation is missing, partial, workaround-only, contradicted by evidence, or written so poorly that a junior would have to guess the intent.
+- `Inconclusive` means available evidence is missing, ambiguous, stale, conflicting, or unsafe to obtain. Use it for missing proof, not for softening a visible half-measure.
 - `Not applicable` is allowed only when the requirement itself makes the condition irrelevant.
 
+Always add these quality checks when they apply to the delivered work:
+
+- `Q1` — no half-measures: every stated obligation is complete, not deferred, sketched, or papered over.
+- `Q2` — details hold: names, paths, commands, IDs, edge cases, and leftover markers match the requirement and nearby code.
+- `Q3` — language is how a senior would write it: clear, concrete, no forced Polish calques of ordinary engineering terms.
+
 Do not treat lack of evidence as `Pass`.
+Do not give `Pass` to work you would send back with "finish this properly".
 
 ### 3. Collect direct evidence
 
@@ -129,20 +158,21 @@ If `verify-code-review` is unavailable or returns `Review status: Inconclusive`,
 
 ### 5. Map code-review findings to requirements
 
-Do not automatically convert every technical finding into a failed task.
+Do not automatically convert every technical finding into a failed task. Do convert half-measures, missing details, and sloppy delivered wording into failed quality checks when they are in the delivered work.
 
 For each `verify-code-review` finding:
 
 - map it to one or more requirement IDs only when the evidence supports the relationship;
-- mark a requirement `Fail` when the finding proves the requirement is not satisfied;
+- mark a requirement `Fail` when the finding proves the requirement is not satisfied, or that the delivered solution is a workaround instead of the asked behavior;
+- mark `Q1`/`Q2`/`Q3` `Fail` when the finding is an incomplete change, a detail miss, or a language/clarity defect in delivered text;
 - mark a requirement `Inconclusive` when the finding exposes a material unresolved risk that prevents reliable verification;
 - otherwise retain the finding in the final report without inventing a requirement failure.
 
-A code review may be `Complete` and still contain findings.
+A code review may be `Complete` and still contain findings. `Complete` plus leftover half-work is still a task-level `Fail`.
 
 ### 6. Roll up the task verdict
 
-Across all applicable atomic requirements:
+Across all applicable atomic requirements, including `Q1`/`Q2`/`Q3` when they apply:
 
 1. `Fail` if any applicable requirement is `Fail`.
 2. Otherwise `Inconclusive` if:
@@ -174,6 +204,13 @@ Produce one concise Markdown verification report:
 - [Fail] R2 — <atomic requirement>
   - Evidence: <short direct locator>
 
+- [Pass|Fail] Q1 — no half-measures
+  - Evidence: <short direct locator>
+- [Pass|Fail] Q2 — details hold
+  - Evidence: <short direct locator>
+- [Pass|Fail] Q3 — language reads like a senior wrote it
+  - Evidence: <short direct locator>
+
 ## Findings
 
 - [Critical|High|Medium|Low] F1 — <location>: <problem>
@@ -195,7 +232,8 @@ Rules:
 - omit `Unknowns` when there are no unknowns;
 - omit implementation details of how `verify-code-review` performed its review;
 - keep evidence pointers short and traceable;
-- do not duplicate large diffs, logs, task descriptions, or artifacts.
+- do not duplicate large diffs, logs, task descriptions, or artifacts;
+- write the report like a senior comment on a junior PR: one idea per bullet, ordinary terms, no calques, no softening.
 
 ### 8. Post the report to the current task
 
@@ -230,3 +268,5 @@ Verdict: <Pass | Fail | Inconclusive>
 <most important blocker, finding, or "No blocking issues found.">
 Report could not be posted to the task: <reason>
 ```
+
+The one-line summary must name the real problem in ordinary engineering language. Do not hide a fail behind vague wording.
