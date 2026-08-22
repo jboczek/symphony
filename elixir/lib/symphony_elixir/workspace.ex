@@ -508,6 +508,7 @@ defmodule SymphonyElixir.Workspace do
 
   defp worktree_branch(issue) do
     case GitWorktree.lookup(workspace_identity(issue)) do
+      {:ok, %{branch: "symphony/" <> _}} -> {:ok, initial_worktree_branch(issue)}
       {:ok, %{branch: branch}} -> {:ok, branch}
       {:ok, nil} -> {:ok, initial_worktree_branch(issue)}
       {:error, _reason} = error -> error
@@ -515,11 +516,13 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp initial_worktree_branch(%{
+         id: native_task_id,
          execution_settings: %TaskExecutionSettings{task_id: task_id},
          title: title
        })
-       when is_binary(task_id) and is_binary(title) do
-    "feature/#{task_id}-#{title_slug(title, 50)}"
+       when is_binary(native_task_id) and is_binary(title) do
+    branch_task_id = if is_binary(task_id), do: task_id, else: native_task_id
+    "feature/#{branch_task_id}-#{title_slug(title, 50)}"
   end
 
   defp initial_worktree_branch(issue), do: "symphony/#{workspace_identity(issue)}"

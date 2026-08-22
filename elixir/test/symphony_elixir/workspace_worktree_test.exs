@@ -71,8 +71,8 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
       assert git(first_workspace, ["status", "--short", "--untracked-files=all"]) == ""
       assert File.read!(Path.join(first_workspace, "README.md")) == "source\n"
 
-      assert git(first_workspace, ["branch", "--show-current"]) == "symphony/todoist-101"
-      assert git(second_workspace, ["branch", "--show-current"]) == "symphony/todoist-102"
+      assert git(first_workspace, ["branch", "--show-current"]) == "feature/101-first-task"
+      assert git(second_workspace, ["branch", "--show-current"]) == "feature/102-first-task"
 
       File.write!(Path.join(first_workspace, "progress.txt"), "keep")
 
@@ -117,25 +117,113 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
     end
   end
 
-  test "owned linked worktrees make shared Git metadata writable for Codex turns" do
+  test "resume adopts a branch changed inside an owned worktree" do
+    test_root = tmp_path("changed-worktree-branch")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    _source = create_git_repository(repository_root, "example.repo")
+    task = issue("105", "Prepare README", "example.repo")
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue(task)
+      assert git(workspace, ["branch", "-m", "feature/105-readme-prep"]) == ""
+
+      assert {:ok, ^workspace} = Workspace.create_for_issue(task)
+      assert Workspace.runtime_info(task, workspace).branch == "feature/105-readme-prep"
+    after
+      Workspace.remove_issue_workspaces(task)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "resume migrates a legacy Symphony branch to the feature convention" do
+    test_root = tmp_path("legacy-worktree-branch")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    _source = create_git_repository(repository_root, "example.repo")
+    task = issue("106", "Update repository", "example.repo")
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue(task)
+      assert git(workspace, ["branch", "-m", "symphony/todoist-106"]) == ""
+
+      metadata_path = Path.join(workspace_root, ".symphony-worktrees/todoist-106.json")
+      metadata = metadata_path |> File.read!() |> Jason.decode!()
+      File.write!(metadata_path, Jason.encode!(%{metadata | "branch" => "symphony/todoist-106"}))
+
+      assert {:ok, ^workspace} = Workspace.create_for_issue(task)
+
+      assert git(workspace, ["branch", "--show-current"]) ==
+               "feature/106-update-repository"
+
+      assert Workspace.runtime_info(task, workspace).branch ==
+               "feature/106-update-repository"
+    after
+      Workspace.remove_issue_workspaces(task)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "resume rejects a feature branch owned by another task" do
+    test_root = tmp_path("unrelated-worktree-branch")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    _source = create_git_repository(repository_root, "example.repo")
+    task = issue("107", "Update repository", "example.repo")
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue(task)
+      assert git(workspace, ["branch", "-m", "feature/999-other-task"]) == ""
+
+      assert {:error, {:workspace_branch_mismatch, "feature/999-other-task", "feature/107-update-repository"}} = Workspace.create_for_issue(task)
+    after
+      Workspace.remove_issue_workspaces(task)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "owned linked worktrees use a scoped Codex permission profile for Git metadata" do
     test_root = tmp_path("worktree-sandbox")
     repository_root = Path.join(test_root, "repositories")
     workspace_root = Path.join(test_root, "workspaces")
     extra_root = Path.join(test_root, "cache")
     codex_binary = Path.join(test_root, "fake-codex")
+    argv_trace = Path.join(test_root, "argv")
+    json_trace = Path.join(test_root, "json")
     source = create_git_repository(repository_root, "example.repo")
     task = issue("103", "Commit from sandbox", "example.repo")
 
     try do
       File.write!(codex_binary, """
       #!/bin/sh
+      printf '%s\n' "$@" > #{argv_trace}
       count=0
-      while IFS= read -r _line; do
+      while IFS= read -r line; do
+        printf '%s\n' "$line" >> #{json_trace}
         count=$((count + 1))
         case "$count" in
           1) printf '%s\\n' '{"id":1,"result":{}}' ;;
           2) ;;
           3) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-worktree"}}}' ;;
+          4)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-worktree"}}}'
+            printf '%s\\n' '{"method":"turn/completed","params":{"turn":{"id":"turn-worktree"}}}'
+            ;;
         esac
       done
       """)
@@ -160,11 +248,20 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
                SymphonyElixir.PathSafety.canonicalize(Path.join(source, ".git"))
 
       try do
-        assert session.turn_sandbox_policy == %{
-                 "type" => "workspaceWrite",
-                 "writableRoots" => [extra_root, workspace, common_git_dir],
-                 "networkAccess" => true
-               }
+        assert session.permissions_profile == "symphony-worktree"
+        assert {:ok, _result} = AppServer.run_turn(session, "Commit changes", task)
+
+        argv = File.read!(argv_trace)
+        assert argv =~ ~s(default_permissions="symphony-worktree")
+        assert argv =~ ~s("#{workspace}"="write")
+        assert argv =~ ~s("#{common_git_dir}"="write")
+        assert argv =~ ~s("#{Path.join(workspace, ".git")}"="read")
+        assert argv =~ ~s("#{extra_root}"="write")
+        assert argv =~ "network.enabled=true"
+
+        json = File.read!(json_trace)
+        assert length(Regex.scan(~r/"permissions":"symphony-worktree"/, json)) == 2
+        refute json =~ "sandboxPolicy"
       after
         AppServer.stop_session(session)
       end
@@ -221,7 +318,7 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
                Workspace.create_for_issue(changed)
 
       assert File.dir?(workspace)
-      assert git(workspace, ["branch", "--show-current"]) == "symphony/todoist-201"
+      assert git(workspace, ["branch", "--show-current"]) == "feature/201-task"
     after
       Workspace.remove_issue_workspaces(original)
       File.rm_rf(test_root)
@@ -279,7 +376,10 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
 
       assert {:ok, ^workspace} = Workspace.create_for_issue(task)
       assert File.dir?(workspace)
-      assert git(workspace, ["branch", "--show-current"]) == "symphony/todoist-401"
+
+      assert git(workspace, ["branch", "--show-current"]) ==
+               "feature/401-recover-stale-worktree"
+
       assert git(source, ["worktree", "list", "--porcelain"]) =~ workspace
     after
       Workspace.remove_issue_workspaces(task)

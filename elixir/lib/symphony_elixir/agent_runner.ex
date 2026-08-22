@@ -16,6 +16,7 @@ defmodule SymphonyElixir.AgentRunner do
     :repository_not_found,
     :not_a_git_repository,
     :repository_worktrees_require_local_worker,
+    :git_branch_migration_failed,
     :workspace_path_conflict,
     :workspace_is_primary_repository,
     :workspace_branch_mismatch,

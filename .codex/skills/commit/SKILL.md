@@ -11,13 +11,14 @@ description:
 ## Prerequisites
 
 - The current branch matches `feature/<task-id>-<short-slug>`.
-   - For a Symphony Todoist task, use `symphony.task_id` from the task front matter.
+   - For a Symphony Todoist task, Symphony creates the branch before the agent starts. It uses
+     `symphony.task_id` from task front matter when present, otherwise the native Todoist task ID.
+     Do not rename or create a branch inside a Symphony-owned worktree; report a mismatch as an
+     orchestration error.
    - Otherwise derive `<task-id>` from the user's request, task description, or linked
       task; ask the user for it when unavailable.
    - Derive `<short-slug>` from the requested changes: lowercase, hyphenated,
       descriptive, and at most 50 characters.
-   - When the current branch does not match, create it with
-      `git cbf <task-id>-<short-slug>` before staging or committing.
 
 ## Goals
 
