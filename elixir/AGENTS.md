@@ -51,6 +51,8 @@ make all
   trade-offs early.
 - Keep changes narrowly scoped; avoid unrelated refactors.
 - Follow existing module/style patterns in `lib/symphony_elixir/*`.
+- Provide browser-based visual verification to Symphony-managed agents through a host-side dynamic
+  tool; do not rely on Codex Desktop browser availability.
 
 Validation command:
 

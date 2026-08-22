@@ -28,6 +28,22 @@ GitLab serves `gitlab_api`. Symphony executes those tools with configured host-s
 removes declared tracker-token environment variables from the Codex child, so the agent does not
 need a second tracker login.
 
+Every session also advertises one deferred `browser` tool for visual verification of local web
+applications. The agent can open or navigate to a URL, inspect a Playwright snapshot, interact by
+element reference, read console messages, resize the viewport, and receive screenshots directly as
+image input. TUI applications use the same tool after the agent starts a browser-xterm wrapper from
+the shell. Browser startup is lazy, the named browser session is reused during the Codex session,
+and Symphony closes it when the session ends. For SSH workers, commands execute on the worker so
+its loopback URLs remain reachable.
+
+The browser tool prefers `playwright-cli` on `PATH` and otherwise lazily runs the pinned
+`@playwright/cli` package through `npx`. Browser hosts therefore need Node.js/npm plus an available
+Chrome installation. Provision a browser explicitly when necessary:
+
+```bash
+npx --yes --package @playwright/cli@0.1.18 playwright-cli install-browser chrome
+```
+
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
 

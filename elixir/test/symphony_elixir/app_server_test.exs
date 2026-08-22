@@ -587,6 +587,10 @@ defmodule SymphonyElixir.AppServerTest do
                          "description" => description,
                          "inputSchema" => %{"required" => ["query"]},
                          "name" => "linear_graphql"
+                       },
+                       %{
+                         "deferLoading" => true,
+                         "name" => "browser"
                        }
                      ] ->
                        description =~ "Linear"
@@ -1041,7 +1045,8 @@ defmodule SymphonyElixir.AppServerTest do
             %{
               "type" => "inputText",
               "text" => ~s({"data":{"viewer":{"id":"usr_123"}}})
-            }
+            },
+            %{"type" => "inputImage", "imageUrl" => "data:image/png;base64,iVBORw=="}
           ]
         }
       end
@@ -1068,7 +1073,9 @@ defmodule SymphonyElixir.AppServerTest do
                  payload["id"] == 102 and
                    get_in(payload, ["result", "success"]) == true and
                    get_in(payload, ["result", "output"]) ==
-                     ~s({"data":{"viewer":{"id":"usr_123"}}})
+                     ~s({"data":{"viewer":{"id":"usr_123"}}}) and
+                   get_in(payload, ["result", "contentItems", Access.at(1), "type"]) ==
+                     "inputImage"
                else
                  false
                end

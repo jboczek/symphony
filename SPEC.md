@@ -1098,6 +1098,16 @@ Unsupported dynamic tool calls:
   using the targeted protocol and continue the session.
 - This prevents the session from stalling on unsupported tool execution paths.
 
+Optional host-side agent tool extension:
+
+- An implementation MAY advertise runtime-owned tools alongside adapter-owned tools.
+- Runtime-owned tool definitions and execution state MUST be bound to one app-server session.
+- Expensive backing processes SHOULD start lazily and MUST be stopped when the owning session ends.
+- Tools that return visual evidence MAY use image content items supported by the targeted
+  app-server protocol.
+- Worker-local tools MUST execute on the selected worker when they need its workspace or loopback
+  network namespace.
+
 Optional provider-native agent tool extension:
 
 - An adapter MAY expose provider-native tools to the app-server session.
@@ -2174,6 +2184,8 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
   targeted protocol
 - If client-side tools are implemented, session startup advertises the supported tool specs
   using the targeted app-server protocol
+- If host-side browser tooling is implemented, it starts lazily, returns structured failures, and
+  is cleaned up with the owning app-server session
 - If provider-native agent tools are implemented:
   - only the selected adapter's tools are advertised to the session
   - valid inputs execute host-side with configured adapter auth

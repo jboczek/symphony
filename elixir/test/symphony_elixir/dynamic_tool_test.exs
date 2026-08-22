@@ -53,7 +53,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     binding = BoundDynamicTool.bind()
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
-    assert BoundDynamicTool.bind().tool_specs == []
+    assert [%{"name" => "browser"}] = BoundDynamicTool.bind().tool_specs
 
     test_pid = self()
 
@@ -73,6 +73,26 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert tracker_settings.api_key == "session-token"
     assert tracker_settings.project_slug == "session-project"
     assert response["success"] == true
+  end
+
+  test "bound tools dispatch browser calls without involving the tracker adapter" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    binding = BoundDynamicTool.bind()
+    test_pid = self()
+
+    response =
+      BoundDynamicTool.execute(
+        "browser",
+        %{"action" => "open", "url" => "http://127.0.0.1:4000"},
+        binding,
+        browser_cli_runner: fn args, _context ->
+          send(test_pid, {:browser_cli, args})
+          {:ok, "opened"}
+        end
+      )
+
+    assert response["success"] == true
+    assert_received {:browser_cli, [_session, "open", "http://127.0.0.1:4000", "--json"]}
   end
 
   test "linear_graphql returns successful GraphQL responses as tool text" do
