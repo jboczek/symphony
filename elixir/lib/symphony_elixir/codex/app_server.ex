@@ -99,6 +99,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           turn_sandbox_policy: turn_sandbox_policy,
           thread_id: thread_id,
           workspace: workspace,
+          worker_host: worker_host,
           dynamic_tool_binding: dynamic_tool_binding
         },
         prompt,
@@ -111,7 +112,8 @@ defmodule SymphonyElixir.Codex.AppServer do
       Keyword.get(opts, :tool_executor, fn tool, arguments ->
         DynamicTool.execute(tool, arguments, dynamic_tool_binding,
           issue: issue,
-          workspace: workspace
+          workspace: workspace,
+          worker_host: worker_host
         )
       end)
 
@@ -178,7 +180,15 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   @spec stop_session(session()) :: :ok
-  def stop_session(%{port: port}) when is_port(port) do
+  def stop_session(%{
+        port: port,
+        workspace: workspace,
+        worker_host: worker_host,
+        dynamic_tool_binding: dynamic_tool_binding
+      })
+      when is_port(port) do
+    DynamicTool.close(dynamic_tool_binding, workspace: workspace, worker_host: worker_host)
+  after
     stop_port(port)
   end
 
