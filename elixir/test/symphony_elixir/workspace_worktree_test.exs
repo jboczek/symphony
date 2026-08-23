@@ -415,7 +415,7 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
   end
 
   defp todoist_after_create_hook do
-    workflow_path = Path.expand("../../WORKFLOW.todoist.md", __DIR__)
+    workflow_path = Path.expand("../../WORKFLOW.todoist.example.md", __DIR__)
     {:ok, %{config: config}} = Workflow.load(workflow_path)
     get_in(config, ["hooks", "after_create"])
   end

@@ -119,6 +119,8 @@ For the included Todoist `_agents` profile, use the locally authenticated offici
 
 ```bash
 td auth status
+cp WORKFLOW.todoist.example.md WORKFLOW.todoist.md
+# Set repositories.root in WORKFLOW.todoist.md and add only necessary local writable roots.
 mise exec -- ./bin/symphony ./WORKFLOW.todoist.md
 ```
 
@@ -225,8 +227,8 @@ Notes:
 - `agent.session_boundary_states` defaults to `[]`. A worker in one of these active states runs one
   turn per Codex session; crossing into or out of one also ends the current session. The normal
   continuation retry starts a fresh agent when the destination remains active.
-- `repositories.root` is the parent directory for Todoist-selected local repositories. It defaults
-  to `/Users/your-username/git`; task values resolve by exact direct-child name only.
+- `repositories.root` is required for the Todoist tracker and is the parent directory for
+  Todoist-selected local repositories. Task values resolve by exact direct-child name only.
 - `context_management.enabled` defaults to `true`; `checkpoint_threshold` defaults to `0.70` and
   must be greater than `0` and at most `1`. Todoist workers calculate usage from the current App
   Server context (`tokenUsage.last.totalTokens / modelContextWindow`), not lifetime token totals.
@@ -409,9 +411,10 @@ codex:
   and rework agents move completed work there and stop. A fresh agent must run the repository
   `verify` skill, which posts a new report comment. Symphony routes `Pass` to `HumanReview` and
   `Fail`/`Inconclusive` to `Rework`; a missing or stale report leaves the task in `Verify`.
-- Runnable profile: `WORKFLOW.todoist.md` uses GPT-5.6 Luna at `xhigh`, approval policy `never`, a
-  workspace-write turn sandbox with network access, automatic 70% context checkpointing, and the
-  `_agents` section lifecycle including `Verify` and `Blocked`.
+- Template profile: `WORKFLOW.todoist.example.md` uses GPT-5.6 Luna at `xhigh`, approval policy
+  `never`, a workspace-write turn sandbox with network access, automatic 70% context checkpointing,
+  and the `_agents` section lifecycle including `Verify` and `Blocked`. Copy it to the ignored
+  `WORKFLOW.todoist.md` and set local paths before running it.
 
 ### GitLab adapter
 
@@ -441,7 +444,8 @@ The observability UI now runs on a minimal Phoenix stack:
 - `lib/`: application code and Mix tasks
 - `test/`: ExUnit coverage for runtime behavior
 - `WORKFLOW.md`: in-repo workflow contract used by local runs
-- `WORKFLOW.todoist.md`: runnable Todoist `_agents` workflow profile
+- `WORKFLOW.todoist.example.md`: public Todoist `_agents` workflow template
+- `WORKFLOW.todoist.md`: ignored local Todoist workflow profile
 - `../.codex/`: repository-local Codex skills and setup helpers
 
 ## Testing

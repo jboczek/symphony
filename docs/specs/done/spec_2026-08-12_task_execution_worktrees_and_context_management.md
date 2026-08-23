@@ -16,8 +16,8 @@ to Todoist before compacting and resuming a thread whose active context reaches 
 
 - Parse optional `symphony.repo`, `symphony.model`, and `symphony.thinking` values from YAML front
   matter at the beginning of a Todoist description while keeping YAML concerns isolated.
-- Resolve repository names as direct children of a configurable local repository root, defaulting
-  to `/Users/your-username/git`, with exact matching and traversal protection.
+- Resolve repository names as direct children of a configurable local repository root required by
+  Todoist workflows, with exact matching and traversal protection.
 - Use one independent Git branch/worktree per repository-backed task; reuse worktrees by stable task
   identity, clean them up through Git, and never mutate or remove a primary working tree.
 - Name new workspaces `<source>-<stable-task-id>-<safe-title-slug>` without making title text part of
