@@ -3,7 +3,7 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
 
   alias SymphonyElixir.{Config.Schema, Workflow}
 
-  @workflow_path Path.expand("../../WORKFLOW.todoist.md", __DIR__)
+  @workflow_path Path.expand("../../WORKFLOW.todoist.example.md", __DIR__)
 
   test "Todoist workflow selects the live project, states, Codex model, and sandbox policies" do
     assert {:ok, workflow} = Workflow.load(@workflow_path)
@@ -14,6 +14,7 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
     assert settings.tracker.active_states == ["Todo", "InProgress", "Verify", "Rework", "Merging"]
     assert settings.tracker.terminal_states == ["Done"]
     assert settings.agent.session_boundary_states == ["Verify"]
+    assert settings.repositories.root == "/path/to/local/repositories"
 
     assert settings.codex.command =~ "--model gpt-5.6-luna"
     assert settings.codex.command =~ "model_reasoning_effort=xhigh"
@@ -27,8 +28,7 @@ defmodule SymphonyElixir.Todoist.WorkflowTest do
 
     assert settings.codex.turn_sandbox_policy == %{
              "type" => "workspaceWrite",
-             "networkAccess" => true,
-             "writableRoots" => ["/Users/your-username/.azure"]
+             "networkAccess" => true
            }
 
     assert workflow.prompt =~ "## Codex Workpad"

@@ -128,14 +128,13 @@ defmodule SymphonyElixir.Config.Schema do
 
     @primary_key false
     embedded_schema do
-      field(:root, :string, default: "/Users/your-username/git")
+      field(:root, :string)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
       |> cast(attrs, [:root], empty_values: [])
-      |> validate_required([:root])
       |> validate_change(:root, fn :root, root ->
         if String.trim(root) == "", do: [root: "can't be blank"], else: []
       end)
@@ -407,7 +406,9 @@ defmodule SymphonyElixir.Config.Schema do
     |> apply_action(:validate)
     |> case do
       {:ok, settings} ->
-        {:ok, finalize_settings(settings)}
+        settings
+        |> finalize_settings()
+        |> validate_repository_root()
 
       {:error, changeset} ->
         {:error, {:invalid_workflow_config, format_errors(changeset)}}
@@ -556,7 +557,7 @@ defmodule SymphonyElixir.Config.Schema do
 
     repositories = %{
       settings.repositories
-      | root: resolve_path_value(settings.repositories.root, "/Users/your-username/git")
+      | root: resolve_path_value(settings.repositories.root, nil)
     }
 
     codex = %{
@@ -579,6 +580,16 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp normalize_optional_map(nil), do: nil
   defp normalize_optional_map(value) when is_map(value), do: normalize_keys(value)
+
+  defp validate_repository_root(%{tracker: %{kind: "todoist"}, repositories: %{root: root}} = settings) do
+    if is_binary(root) and String.trim(root) != "" do
+      {:ok, settings}
+    else
+      {:error, {:invalid_workflow_config, "repositories.root is required for the todoist tracker"}}
+    end
+  end
+
+  defp validate_repository_root(settings), do: {:ok, settings}
 
   defp normalize_key(value) when is_atom(value), do: Atom.to_string(value)
   defp normalize_key(value), do: to_string(value)
@@ -605,6 +616,8 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp resolve_secret_setting(value, _fallback), do: value
+
+  defp resolve_path_value(nil, default), do: default
 
   defp resolve_path_value(value, default) when is_binary(value) do
     case normalize_path_token(value) do

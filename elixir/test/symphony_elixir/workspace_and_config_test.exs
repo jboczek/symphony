@@ -38,6 +38,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert error =~ "browser.expose_network"
   end
 
+  test "Todoist configuration requires a repository root" do
+    assert {:error, {:invalid_workflow_config, error}} =
+             Schema.parse(%{tracker: %{kind: "todoist"}})
+
+    assert error =~ "repositories.root is required for the todoist tracker"
+  end
+
   test "workspace bootstrap can be implemented in after_create hook" do
     test_root =
       Path.join(
@@ -1045,8 +1052,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.tracker.project_slug == nil
     assert config.tracker.required_labels == []
     assert config.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
-    assert config.repositories.root == "/Users/your-username/git"
-    assert Config.local_repository_root() == "/Users/your-username/git"
+    repository_root = Path.join(System.tmp_dir!(), "symphony_repositories")
+    assert config.repositories.root == repository_root
+    assert Config.local_repository_root() == repository_root
     assert config.worker.max_concurrent_agents_per_host == nil
     assert config.agent.max_concurrent_agents == 10
     assert config.codex.command == "codex app-server"
