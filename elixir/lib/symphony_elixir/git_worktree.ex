@@ -114,16 +114,43 @@ defmodule SymphonyElixir.GitWorktree do
   end
 
   defp add_worktree(repository, workspace, branch) do
-    args =
-      if local_branch_exists?(repository, branch) do
-        ["worktree", "add", workspace, branch]
-      else
-        ["worktree", "add", "-b", branch, workspace, default_base_ref(repository)]
+    if local_branch_exists?(repository, branch) do
+      add_worktree(repository, ["worktree", "add", workspace, branch])
+    else
+      with :ok <- refresh_origin(repository) do
+        add_worktree(repository, [
+          "worktree",
+          "add",
+          "--no-track",
+          "-b",
+          branch,
+          workspace,
+          default_base_ref(repository)
+        ])
       end
+    end
+  end
 
+  defp add_worktree(repository, args) do
     case git(repository, args) do
       {:ok, _output} -> :ok
       {:error, status, output} -> {:error, {:git_worktree_add_failed, status, bounded(output)}}
+    end
+  end
+
+  defp refresh_origin(repository) do
+    case git(repository, ["config", "--get", "remote.origin.url"]) do
+      {:ok, url} when url != "" -> fetch_origin(repository)
+      {:ok, _url} -> :ok
+      {:error, 1, _output} -> :ok
+      {:error, status, output} -> {:error, {:git_origin_inspection_failed, status, bounded(output)}}
+    end
+  end
+
+  defp fetch_origin(repository) do
+    case git(repository, ["fetch", "--prune", "origin"]) do
+      {:ok, _output} -> :ok
+      {:error, status, output} -> {:error, {:git_fetch_failed, status, bounded(output)}}
     end
   end
 

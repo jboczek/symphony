@@ -240,6 +240,9 @@ Notes:
 - For a task selected with `symphony.repo`, the repository must already exist under
   `repositories.root`; the workspace is created with `git worktree`, so `after_create` should run
   setup commands and must not clone the repository into `.`.
+- Before creating a new worktree branch, Symphony fetches and prunes `origin` when that remote is
+  configured. Fetch failures abort workspace creation. The new branch starts from `origin/HEAD`
+  without tracking the default branch; publish it with `git push --set-upstream origin HEAD`.
 - The Todoist profile exposes `SYMPHONY_CODEX_DIR` to local hooks. Its `after_create` copies the
   repository-local `.codex/` skills into the workspace and excludes that copy from the worktree's
   Git status. A Todoist task without `symphony.repo` still gets a plain workspace, with the same

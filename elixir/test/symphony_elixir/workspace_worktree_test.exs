@@ -90,6 +90,77 @@ defmodule SymphonyElixir.WorkspaceWorktreeTest do
     end
   end
 
+  test "new worktrees fetch origin without tracking the default branch" do
+    test_root = tmp_path("worktree-origin")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    source = create_git_repository(repository_root, "example.repo")
+    origin = Path.join(test_root, "origin.git")
+    publisher = Path.join(test_root, "publisher")
+    task = issue("103", "Fresh branch", "example.repo")
+
+    try do
+      assert {_output, 0} = System.cmd("git", ["init", "--bare", origin])
+      assert git(source, ["remote", "add", "origin", origin]) == ""
+      assert git(source, ["push", "-u", "origin", "main"]) =~ "branch 'main' set up"
+      assert git(source, ["remote", "set-head", "origin", "main"]) == ""
+      assert {_output, 0} = System.cmd("git", ["clone", origin, publisher])
+      assert git(publisher, ["config", "user.name", "Test User"]) == ""
+      assert git(publisher, ["config", "user.email", "test@example.com"]) == ""
+      File.write!(Path.join(publisher, "remote.txt"), "fresh\n")
+      assert git(publisher, ["add", "remote.txt"]) == ""
+      assert git(publisher, ["commit", "-m", "remote update"]) =~ "remote update"
+      assert git(publisher, ["push", "origin", "main"]) =~ "main -> main"
+
+      stale_origin_head = git(source, ["rev-parse", "origin/main"])
+      fresh_origin_head = git(publisher, ["rev-parse", "HEAD"])
+      refute stale_origin_head == fresh_origin_head
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue(task)
+      assert git(workspace, ["rev-parse", "HEAD"]) == fresh_origin_head
+
+      assert git(workspace, [
+               "for-each-ref",
+               "--format=%(upstream:short)",
+               "refs/heads/feature/103-fresh-branch"
+             ]) == ""
+    after
+      Workspace.remove_issue_workspaces(task)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "new worktree creation fails when origin cannot be fetched" do
+    test_root = tmp_path("worktree-fetch-failure")
+    repository_root = Path.join(test_root, "repositories")
+    workspace_root = Path.join(test_root, "workspaces")
+    source = create_git_repository(repository_root, "example.repo")
+    task = issue("104", "Unavailable origin", "example.repo")
+
+    try do
+      missing_origin = Path.join(test_root, "missing-origin.git")
+      assert git(source, ["remote", "add", "origin", missing_origin]) == ""
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        repository_root: repository_root
+      )
+
+      assert {:error, {:git_fetch_failed, _status, _output}} =
+               Workspace.create_for_issue(task)
+
+      refute File.exists?(Path.join(workspace_root, Workspace.workspace_key(task)))
+    after
+      Workspace.remove_issue_workspaces(task)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "task IDs create and resume feature branches" do
     test_root = tmp_path("task-id-worktree")
     repository_root = Path.join(test_root, "repositories")
