@@ -213,6 +213,8 @@ defmodule SymphonyElixir.AgentRunner do
     prompt =
       build_turn_prompt(issue, run_state.opts, turn_number, run_state.max_turns, turn_kind)
 
+    send_prompt_trace(run_state.recipient, issue, prompt, turn_number, turn_kind)
+
     with {:ok, turn_session} <-
            AppServer.run_turn(
              run_state.session,
@@ -243,6 +245,23 @@ defmodule SymphonyElixir.AgentRunner do
       end
     end
   end
+
+  defp send_prompt_trace(recipient, %Issue{id: issue_id}, prompt, turn_number, turn_kind)
+       when is_binary(issue_id) and is_pid(recipient) and is_binary(prompt) do
+    send(recipient, {
+      :codex_worker_update,
+      issue_id,
+      %{
+        event: :prompt_sent,
+        payload: %{prompt: prompt, turn: turn_number, kind: turn_kind},
+        timestamp: DateTime.utc_now()
+      }
+    })
+
+    :ok
+  end
+
+  defp send_prompt_trace(_recipient, _issue, _prompt, _turn_number, _turn_kind), do: :ok
 
   defp continue_after_turn(run_state, issue, turn_number) do
     context = Process.get(run_state.context_key)

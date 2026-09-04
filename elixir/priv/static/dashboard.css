@@ -458,6 +458,31 @@ pre,
   text-underline-offset: 0.18em;
 }
 
+.trace-link {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  text-underline-offset: 0.2em;
+}
+
+.trace-link:hover,
+.trace-link:focus-visible {
+  color: var(--accent);
+  box-shadow: none;
+  transform: none;
+}
+
 .issue-link {
   color: var(--muted);
   font-size: 0.86rem;
@@ -501,6 +526,100 @@ pre,
   color: var(--danger);
 }
 
+.trace-modal {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(0.75rem, 3vw, 2rem);
+}
+
+.trace-backdrop {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(3, 7, 13, 0.78);
+  box-shadow: none;
+  cursor: default;
+}
+
+.trace-backdrop:hover { transform: none; box-shadow: none; }
+
+.trace-panel {
+  position: relative;
+  z-index: 1;
+  width: min(980px, 100%);
+  max-height: min(820px, calc(100vh - 1.5rem));
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background: #131925;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.55);
+}
+
+.trace-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  padding: 1.35rem 1.35rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.trace-eyebrow, .trace-meta { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.trace-eyebrow { color: var(--accent-ink); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.trace-title { margin: 0.24rem 0; font-size: 1.55rem; letter-spacing: -0.035em; }
+.trace-close { padding: 0.42rem 0.75rem; background: transparent; border-color: var(--line-strong); color: var(--ink); box-shadow: none; }
+.trace-close:hover { transform: none; box-shadow: none; background: var(--card-muted); }
+
+.trace-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0.75rem 1.35rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+.trace-timeline { list-style: none; margin: 0; padding: 1.1rem 1.35rem 1.5rem; }
+.trace-event { position: relative; padding: 0 0 1.1rem 1.6rem; }
+.trace-event:last-child { padding-bottom: 0; }
+.trace-rail { position: absolute; top: 0.15rem; bottom: -0.2rem; left: 0.34rem; width: 1px; background: var(--line-strong); }
+.trace-event:last-child .trace-rail { bottom: auto; height: 0.52rem; }
+.trace-rail::before { content: ""; position: absolute; top: 0; left: -0.28rem; width: 0.52rem; height: 0.52rem; border: 2px solid var(--line-strong); border-radius: 50%; background: #131925; }
+.trace-event-accent .trace-rail::before { border-color: var(--accent); background: var(--accent-soft); }
+.trace-event-danger .trace-rail::before { border-color: var(--danger); background: var(--danger-soft); }
+.trace-event-head { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+.trace-event-kind { font-size: 0.9rem; font-weight: 700; text-transform: capitalize; }
+.trace-event-time { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+.trace-prompt-label { margin-top: 0.45rem; color: var(--accent-ink); font-size: 0.78rem; font-weight: 700; }
+.trace-prompt, .trace-payload { margin-top: 0.45rem; padding: 0.8rem; border: 1px solid var(--line); border-radius: 12px; background: #0d121b; color: #d5dce7; font-size: 0.78rem; line-height: 1.55; }
+.trace-prompt { border-color: rgba(52, 211, 153, 0.28); }
+
+.trace-message {
+  margin-top: 0.45rem;
+  color: #dce6f4;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.trace-commands {
+  margin: 0.75rem 1.35rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+}
+
+.trace-commands summary { cursor: pointer; color: var(--ink); font-weight: 700; }
+.trace-commands ol { display: grid; gap: 0.75rem; padding-left: 1.25rem; }
+.trace-commands pre { margin-top: 0.3rem; font-size: 0.75rem; }
+.trace-raw-button { margin: 0.25rem 1.35rem 1rem; }
+
 @media (max-width: 860px) {
   .app-shell {
     padding: 1rem 0.85rem 2rem;
@@ -530,4 +649,8 @@ pre,
     border-radius: 20px;
     padding: 1rem;
   }
+
+  .trace-header { padding: 1rem; }
+  .trace-summary, .trace-timeline { padding-left: 1rem; padding-right: 1rem; }
+  .trace-event-head { align-items: flex-start; flex-direction: column; gap: 0.1rem; }
 }

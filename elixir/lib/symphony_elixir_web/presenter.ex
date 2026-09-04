@@ -3,7 +3,7 @@ defmodule SymphonyElixirWeb.Presenter do
   Shared projections for the observability API and dashboard.
   """
 
-  alias SymphonyElixir.{Config, Orchestrator, StatusDashboard, Workspace}
+  alias SymphonyElixir.{CodexSessionHistory, Config, Orchestrator, StatusDashboard, Workspace}
 
   @spec state_payload(GenServer.name(), timeout()) :: map()
   def state_payload(orchestrator, snapshot_timeout_ms) do
@@ -22,6 +22,7 @@ defmodule SymphonyElixirWeb.Presenter do
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
           blocked: Enum.map(Map.get(snapshot, :blocked, []), &blocked_entry_payload/1),
           completed_sessions: Enum.map(Map.get(snapshot, :completed_sessions, []), &completed_session_payload/1),
+          historical_sessions: CodexSessionHistory.recent_sessions(),
           codex_totals: codex_totals_payload(snapshot.codex_totals),
           rate_limits: snapshot.rate_limits
         }
@@ -141,6 +142,7 @@ defmodule SymphonyElixirWeb.Presenter do
       last_event: Map.get(entry, :last_codex_event),
       last_message: summarize_message(Map.get(entry, :last_codex_message)),
       last_event_at: iso8601(Map.get(entry, :last_codex_timestamp)),
+      trace: trace_payload(Map.get(entry, :trace, [])),
       tokens: %{
         input_tokens: Map.get(entry, :codex_input_tokens, 0),
         cached_input_tokens: Map.get(entry, :codex_cached_input_tokens, 0),
@@ -286,6 +288,18 @@ defmodule SymphonyElixirWeb.Presenter do
 
   defp summarize_message(nil), do: nil
   defp summarize_message(message), do: StatusDashboard.humanize_codex_message(message)
+
+  defp trace_payload(trace) when is_list(trace) do
+    Enum.map(trace, fn event ->
+      %{
+        event: Map.get(event, :event),
+        at: iso8601(Map.get(event, :timestamp)),
+        payload: Map.get(event, :payload)
+      }
+    end)
+  end
+
+  defp trace_payload(_trace), do: []
 
   defp due_at_iso8601(due_in_ms) when is_integer(due_in_ms) do
     DateTime.utc_now()
