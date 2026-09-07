@@ -41,7 +41,7 @@ defmodule SymphonyElixir.ContextManagerTest do
              compaction_state: "completed"
            }
 
-    reset = ContextManager.resume_completed(context)
+    reset = ContextManager.resume_started(context)
     assert reset.phase == :normal
 
     future_crossing = ContextManager.observe(reset, usage_message(80, 100, 80))
@@ -68,7 +68,7 @@ defmodule SymphonyElixir.ContextManagerTest do
              }
            }) == context
 
-    assert ContextManager.resume_completed(context) == context
+    assert ContextManager.resume_started(context) == context
     refute ContextManager.checkpoint_pending?(context)
   end
 

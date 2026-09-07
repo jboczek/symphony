@@ -29,7 +29,7 @@ defmodule SymphonyElixir.ContextCheckpointFlowTest do
         {:ok,
          [
            %{
-             "id" => "checkpoint-new",
+             "id" => "checkpoint-#{div(count, 2)}",
              "content" => "[SYMPHONY_CHECKPOINT_V1]\nNext action: continue",
              "postedAt" => "2026-08-12T12:00:00Z"
            }
@@ -77,21 +77,43 @@ defmodule SymphonyElixir.ContextCheckpointFlowTest do
           printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-normal"}}}'
           printf '%s\\n' '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-flow","turnId":"turn-normal","tokenUsage":{"last":{"inputTokens":60,"outputTokens":10,"totalTokens":70},"total":{"totalTokens":7000},"modelContextWindow":100}}}'
           printf '%s\\n' '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-flow","turnId":"turn-normal","tokenUsage":{"last":{"inputTokens":70,"outputTokens":10,"totalTokens":80},"total":{"totalTokens":9000},"modelContextWindow":100}}}'
-          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-normal"}}}'
           ;;
         5)
+          case "$line" in *'"method":"turn/interrupt"'*) ;; *) exit 41 ;; esac
+          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"unrelated","status":"completed"}}}'
+          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-normal","status":"interrupted"}}}'
+          ;;
+        6)
           printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-checkpoint"}}}'
           printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-checkpoint"}}}'
           ;;
-        6)
+        7)
           printf '%s\\n' '{"id":5,"result":{}}'
           printf '%s\\n' '{"method":"item/started","params":{"threadId":"thread-flow","turnId":"turn-compact","item":{"type":"contextCompaction","id":"compact-item"}}}'
           printf '%s\\n' '{"method":"item/completed","params":{"threadId":"thread-flow","turnId":"turn-compact","item":{"type":"contextCompaction","id":"compact-item"}}}'
           printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-compact"}}}'
           ;;
-        7)
+        8)
           printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-resume"}}}'
-          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-resume"}}}'
+          printf '%s\\n' '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-flow","turnId":"turn-resume","tokenUsage":{"last":{"totalTokens":75},"modelContextWindow":100}}}'
+          ;;
+        9)
+          case "$line" in *'"method":"turn/interrupt"'*) ;; *) exit 42 ;; esac
+          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-resume","status":"interrupted"}}}'
+          ;;
+        10)
+          printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-checkpoint-2"}}}'
+          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-checkpoint-2","status":"completed"}}}'
+          ;;
+        11)
+          printf '%s\\n' '{"id":5,"result":{}}'
+          printf '%s\\n' '{"method":"item/started","params":{"threadId":"thread-flow","turnId":"turn-compact-2","item":{"type":"contextCompaction","id":"compact-item-2"}}}'
+          printf '%s\\n' '{"method":"item/completed","params":{"threadId":"thread-flow","turnId":"turn-compact-2","item":{"type":"contextCompaction","id":"compact-item-2"}}}'
+          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-compact-2","status":"completed"}}}'
+          ;;
+        12)
+          printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-resume-2"}}}'
+          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-flow","turn":{"id":"turn-resume-2","status":"completed"}}}'
           exit 0
           ;;
       esac
@@ -107,6 +129,7 @@ defmodule SymphonyElixir.ContextCheckpointFlowTest do
       workspace_root: workspace_root,
       codex_command: "#{codex_binary} app-server",
       context_management_enabled: true,
+      codex_turn_timeout_ms: 500,
       context_checkpoint_threshold: 0.70
     )
 
@@ -125,7 +148,7 @@ defmodule SymphonyElixir.ContextCheckpointFlowTest do
     issue_state_fetcher = fn [_issue_id] ->
       fetches = Process.get(:checkpoint_issue_fetches, 0) + 1
       Process.put(:checkpoint_issue_fetches, fetches)
-      state = if fetches == 1, do: "InProgress", else: "Done"
+      state = if fetches <= 2, do: "InProgress", else: "Done"
       {:ok, [%{issue | state: state}]}
     end
 
@@ -142,9 +165,15 @@ defmodule SymphonyElixir.ContextCheckpointFlowTest do
       |> Enum.map(&(&1 |> String.trim_leading("JSON:") |> Jason.decode!()))
 
     turn_requests = Enum.filter(payloads, &(&1["method"] == "turn/start"))
-    assert length(turn_requests) == 3
+    assert length(turn_requests) == 5
 
-    [normal_request, checkpoint_request, resume_request] = turn_requests
+    assert [
+             %{"params" => %{"threadId" => "thread-flow", "turnId" => "turn-normal"}},
+             %{"params" => %{"threadId" => "thread-flow", "turnId" => "turn-resume"}}
+           ] =
+             Enum.filter(payloads, &(&1["method"] == "turn/interrupt"))
+
+    [normal_request, checkpoint_request, resume_request, _second_checkpoint, second_resume] = turn_requests
     assert get_in(normal_request, ["params", "threadId"]) == "thread-flow"
 
     assert [
@@ -154,10 +183,13 @@ defmodule SymphonyElixir.ContextCheckpointFlowTest do
 
     assert String.ends_with?(skill_path, "/.codex/skills/checkpoint/SKILL.md")
     assert checkpoint_instruction =~ "[SYMPHONY_CHECKPOINT_V1]"
+    assert checkpoint_instruction =~ "$checkpoint"
+    assert checkpoint_instruction =~ "end this turn immediately"
+    assert get_in(second_resume, ["params", "input", Access.at(0), "text"]) =~ "comment checkpoint-2"
 
     assert get_in(resume_request, ["params", "threadId"]) == "thread-flow"
     resume_prompt = get_in(resume_request, ["params", "input", Access.at(0), "text"])
-    assert resume_prompt =~ "latest Todoist comment"
+    assert resume_prompt =~ "Read Todoist comment checkpoint-1 for task flow-task"
     assert resume_prompt =~ "[SYMPHONY_CHECKPOINT_V1]"
 
     compact_request = Enum.find(payloads, &(&1["method"] == "thread/compact/start"))
@@ -201,9 +233,12 @@ defmodule SymphonyElixir.ContextCheckpointFlowTest do
         4)
           printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-normal"}}}'
           printf '%s\\n' '{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"last":{"totalTokens":70},"total":{"totalTokens":7000},"modelContextWindow":100}}}'
-          printf '%s\\n' '{"method":"turn/completed"}'
           ;;
         5)
+          case "$line" in *'"method":"turn/interrupt"'*) ;; *) exit 41 ;; esac
+          printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-failure","turn":{"id":"turn-normal","status":"interrupted"}}}'
+          ;;
+        6)
           printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-checkpoint"}}}'
           printf '%s\\n' '{"method":"turn/completed"}'
           ;;

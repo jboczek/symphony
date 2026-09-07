@@ -397,11 +397,17 @@ codex:
   Implement the requested change.
   ```
 
-- Context recovery: when current context reaches the configured threshold, Symphony waits for the
-  turn boundary, invokes `.codex/skills/checkpoint/SKILL.md` as an explicit App Server skill input,
+- Context recovery: when current context reaches the configured threshold, Symphony sends one
+  `turn/interrupt` and waits for that specific turn to finish. It then invokes
+  `.codex/skills/checkpoint/SKILL.md` as an explicit App Server skill input,
   verifies a new Todoist comment whose first line is `[SYMPHONY_CHECKPOINT_V1]`, waits for
-  `thread/compact/start` to finish, and resumes the same thread from the newest checkpoint. A
-  missing checkpoint prevents compaction; compaction failure leaves the durable comment intact.
+  `thread/compact/start` to finish successfully, and resumes the same thread with the verified
+  comment ID and an instruction to read it before continuing. Resumed turns are monitored from
+  their start. Checkpoint turns only save state and end; they are not interrupted by this threshold.
+  A missing checkpoint prevents compaction; compaction failure leaves the durable comment intact.
+  Interrupt errors/timeouts fail the run instead of starting overlapping turns. Usage notifications
+  are observations, not a hard token cap: leave enough headroom below Codex auto-compaction for
+  checkpoint generation and tool results. In-flight host tools may delay event processing.
 - Tool: the structured `todoist` tool exposes only task get/move/update/create, comment
   list/create/update, and persistent Workpad upsert. `comment_create` can also attach a readable
   file from the task workspace using `file_path` and optional `file_name`. It does not expose
