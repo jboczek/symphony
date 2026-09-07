@@ -56,11 +56,11 @@ defmodule SymphonyElixir.ContextManager do
   def compaction_completed(%__MODULE__{phase: :compacting} = state),
     do: %{state | phase: :resuming}
 
-  @spec resume_completed(t()) :: t()
-  def resume_completed(%__MODULE__{phase: :resuming} = state),
+  @spec resume_started(t()) :: t()
+  def resume_started(%__MODULE__{phase: :resuming} = state),
     do: %{state | phase: :normal}
 
-  def resume_completed(%__MODULE__{} = state), do: state
+  def resume_started(%__MODULE__{} = state), do: state
 
   @spec checkpoint_pending?(t()) :: boolean()
   def checkpoint_pending?(%__MODULE__{phase: :checkpoint_pending}), do: true

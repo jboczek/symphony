@@ -163,7 +163,16 @@ defmodule SymphonyElixir.Codex.AppServer do
           metadata
         )
 
-        case await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
+        control = %{
+          thread_id: thread_id,
+          turn_id: turn_id,
+          interrupt_when: Keyword.get(opts, :interrupt_when, fn -> false end),
+          auto_approve_requests: auto_approve_requests,
+          interrupt_id: "checkpoint-interrupt:#{turn_id}",
+          interrupt_deadline: nil
+        }
+
+        case await_turn_completion(port, on_message, tool_executor, auto_approve_requests, control) do
           {:ok, result} ->
             Logger.info("Codex session completed for #{issue_context(issue)} session_id=#{session_id}")
 
@@ -227,6 +236,8 @@ defmodule SymphonyElixir.Codex.AppServer do
       metadata,
       %{
         response?: false,
+        thread_id: thread_id,
+        turn_id: nil,
         item_id: nil,
         item_completed?: false,
         turn_completed?: false,
@@ -710,6 +721,18 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
+  defp handle_compaction_payload(port, on_message, metadata, state, %{"params" => %{"threadId" => thread_id}})
+       when thread_id != state.thread_id,
+       do: continue_compaction(port, on_message, metadata, state)
+
+  defp handle_compaction_payload(port, on_message, metadata, state, %{"params" => %{"turnId" => turn_id}})
+       when not is_nil(state.turn_id) and turn_id != state.turn_id,
+       do: continue_compaction(port, on_message, metadata, state)
+
+  defp handle_compaction_payload(port, on_message, metadata, state, %{"params" => %{"turn" => %{"id" => turn_id}}})
+       when not is_nil(state.turn_id) and turn_id != state.turn_id,
+       do: continue_compaction(port, on_message, metadata, state)
+
   defp handle_compaction_payload(
          _port,
          _on_message,
@@ -738,7 +761,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     case get_in(payload, ["params", "item"]) do
       %{"type" => "contextCompaction", "id" => item_id} ->
         emit_message(on_message, :compaction_started, %{payload: payload}, metadata)
-        continue_compaction(port, on_message, metadata, %{state | item_id: item_id})
+        continue_compaction(port, on_message, metadata, %{state | item_id: item_id, turn_id: get_in(payload, ["params", "turnId"])})
 
       _item ->
         continue_with_compaction_notification(port, on_message, metadata, state, payload)
@@ -756,7 +779,7 @@ defmodule SymphonyElixir.Codex.AppServer do
 
     item_completed? =
       is_binary(state.item_id) and is_map(item) and
-        (item["id"] == state.item_id or item["type"] == "contextCompaction")
+        item["id"] == state.item_id
 
     emit_message(on_message, :notification, %{payload: payload}, metadata)
 
@@ -787,7 +810,11 @@ defmodule SymphonyElixir.Codex.AppServer do
          %{"method" => "turn/completed"} = payload
        ) do
     emit_message(on_message, :notification, %{payload: payload}, metadata)
-    continue_compaction(port, on_message, metadata, %{state | turn_completed?: true})
+
+    case get_in(payload, ["params", "turn", "status"]) do
+      status when status in ["failed", "interrupted"] -> {:error, {:compaction_failed, payload}}
+      _ -> continue_compaction(port, on_message, metadata, %{state | turn_completed?: not is_nil(state.item_id)})
+    end
   end
 
   defp handle_compaction_payload(
@@ -836,48 +863,73 @@ defmodule SymphonyElixir.Codex.AppServer do
     await_compaction(port, on_message, metadata, state, "")
   end
 
-  defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
+  defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests, control) do
     receive_loop(
       port,
       on_message,
       Config.settings!().codex.turn_timeout_ms,
       "",
       tool_executor,
-      auto_approve_requests
+      auto_approve_requests,
+      control
     )
   end
 
-  defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests) do
-    receive do
-      {^port, {:data, {:eol, chunk}}} ->
-        complete_line = pending_line <> to_string(chunk)
-        handle_incoming(port, on_message, complete_line, timeout_ms, tool_executor, auto_approve_requests)
+  defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests, control) do
+    control = maybe_interrupt_turn(port, control)
 
-      {^port, {:data, {:noeol, chunk}}} ->
-        receive_loop(
-          port,
-          on_message,
-          timeout_ms,
-          pending_line <> to_string(chunk),
-          tool_executor,
-          auto_approve_requests
-        )
+    remaining_ms =
+      if control.interrupt_deadline do
+        max(control.interrupt_deadline - System.monotonic_time(:millisecond), 0)
+      else
+        timeout_ms
+      end
 
-      {^port, {:exit_status, status}} ->
-        {:error, {:port_exit, status}}
-    after
-      timeout_ms ->
-        {:error, :turn_timeout}
+    timeout_reason = if control.interrupt_deadline, do: :interrupt_timeout, else: :turn_timeout
+
+    if remaining_ms == 0 do
+      {:error, timeout_reason}
+    else
+      receive do
+        {^port, {:data, {:eol, chunk}}} ->
+          complete_line = pending_line <> to_string(chunk)
+          handle_incoming(port, on_message, complete_line, timeout_ms, tool_executor, auto_approve_requests, control)
+
+        {^port, {:data, {:noeol, chunk}}} ->
+          receive_loop(
+            port,
+            on_message,
+            timeout_ms,
+            pending_line <> to_string(chunk),
+            tool_executor,
+            auto_approve_requests,
+            control
+          )
+
+        {^port, {:exit_status, status}} ->
+          {:error, {:port_exit, status}}
+      after
+        remaining_ms ->
+          {:error, timeout_reason}
+      end
     end
   end
 
-  defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests) do
+  defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests, control) do
     payload_string = to_string(data)
 
-    case Jason.decode(payload_string) do
+    interrupt_id = control.interrupt_id
+
+    case decode_turn_message(payload_string, control) do
+      {:ok, %{"id" => ^interrupt_id, "error" => error}} ->
+        {:error, {:interrupt_failed, error}}
+
+      :ignore ->
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, control)
+
       {:ok, %{"method" => "turn/completed"} = payload} ->
         emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
-        {:ok, :turn_completed}
+        turn_result(payload, control)
 
       {:ok, %{"method" => "turn/failed", "params" => _} = payload} ->
         emit_turn_event(
@@ -913,7 +965,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           method,
           timeout_ms,
           tool_executor,
-          auto_approve_requests
+          control
         )
 
       {:ok, payload} ->
@@ -927,24 +979,44 @@ defmodule SymphonyElixir.Codex.AppServer do
           metadata_from_message(port, payload)
         )
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, control)
 
       {:error, _reason} ->
         log_non_json_stream_line(payload_string, "turn stream")
 
-        if protocol_message_candidate?(payload_string) do
-          emit_message(
-            on_message,
-            :malformed,
-            %{
-              payload: payload_string,
-              raw: payload_string
-            },
-            metadata_from_message(port, %{raw: payload_string})
-          )
-        end
+        emit_malformed_message(port, on_message, payload_string)
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, control)
+    end
+  end
+
+  defp decode_turn_message(data, control) do
+    case Jason.decode(data) do
+      {:ok, payload} = decoded -> if matching_turn_message?(payload, control), do: decoded, else: :ignore
+      error -> error
+    end
+  end
+
+  defp matching_turn_message?(%{"params" => %{"threadId" => id}}, control) when id != control.thread_id, do: false
+  defp matching_turn_message?(%{"params" => %{"turnId" => id}}, control) when id != control.turn_id, do: false
+  defp matching_turn_message?(%{"params" => %{"turn" => %{"id" => id}}}, control) when id != control.turn_id, do: false
+
+  defp matching_turn_message?(%{"method" => "turn/completed"} = payload, %{interrupt_deadline: deadline} = control)
+       when not is_nil(deadline) do
+    get_in(payload, ["params", "threadId"]) == control.thread_id and
+      get_in(payload, ["params", "turn", "id"]) == control.turn_id
+  end
+
+  defp matching_turn_message?(_payload, _control), do: true
+
+  defp emit_malformed_message(port, on_message, payload_string) do
+    if protocol_message_candidate?(payload_string) do
+      emit_message(
+        on_message,
+        :malformed,
+        %{payload: payload_string, raw: payload_string},
+        metadata_from_message(port, %{raw: payload_string})
+      )
     end
   end
 
@@ -969,8 +1041,9 @@ defmodule SymphonyElixir.Codex.AppServer do
          method,
          timeout_ms,
          tool_executor,
-         auto_approve_requests
+         control
        ) do
+    auto_approve_requests = control.auto_approve_requests
     metadata = metadata_from_message(port, payload)
 
     case maybe_handle_approval_request(
@@ -994,7 +1067,7 @@ defmodule SymphonyElixir.Codex.AppServer do
         {:error, {:turn_input_required, payload}}
 
       :approved ->
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, control)
 
       :approval_required ->
         emit_message(
@@ -1028,8 +1101,33 @@ defmodule SymphonyElixir.Codex.AppServer do
           )
 
           Logger.debug("Codex notification: #{inspect(method)}")
-          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, control)
         end
+    end
+  end
+
+  defp maybe_interrupt_turn(port, %{interrupt_deadline: nil} = control) do
+    if control.interrupt_when.() do
+      send_message(port, %{
+        "id" => control.interrupt_id,
+        "method" => "turn/interrupt",
+        "params" => %{"threadId" => control.thread_id, "turnId" => control.turn_id}
+      })
+
+      %{control | interrupt_deadline: System.monotonic_time(:millisecond) + Config.settings!().codex.turn_timeout_ms}
+    else
+      control
+    end
+  end
+
+  defp maybe_interrupt_turn(_port, control), do: control
+
+  defp turn_result(payload, control) do
+    case get_in(payload, ["params", "turn", "status"]) do
+      "failed" -> {:error, {:turn_failed, payload["params"]}}
+      "interrupted" when not is_nil(control.interrupt_deadline) -> {:ok, :checkpoint_interrupted}
+      "interrupted" -> {:error, {:turn_cancelled, payload["params"]}}
+      _ -> {:ok, :turn_completed}
     end
   end
 

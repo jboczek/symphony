@@ -15,6 +15,11 @@ tracker:
     - Canceled
     - Duplicate
     - Done
+# Todoist context recovery (inactive for this Linear workflow): interrupt the active turn,
+# save and verify a checkpoint comment, compact, then resume with that comment ID.
+context_management:
+  enabled: true
+  checkpoint_threshold: 0.70
 polling:
   interval_ms: 5000
 workspace:

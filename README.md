@@ -10,6 +10,9 @@ _In this [demo video](https://player.vimeo.com/video/1186371009?h=5626e4b899), S
 > [!WARNING]
 > Symphony is a low-key engineering preview for testing in trusted environments.
 
+For Todoist runs, the Elixir implementation interrupts long turns at a configured context threshold,
+saves a verified checkpoint comment, compacts the same thread, and resumes from that checkpoint.
+
 ## Running Symphony
 
 ### Requirements

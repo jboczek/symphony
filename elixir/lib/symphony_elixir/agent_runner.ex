@@ -213,23 +213,21 @@ defmodule SymphonyElixir.AgentRunner do
     prompt =
       build_turn_prompt(issue, run_state.opts, turn_number, run_state.max_turns, turn_kind)
 
+    send_prompt_trace(run_state.recipient, issue, prompt, turn_number, turn_kind)
+
+    if match?({:resume, _}, turn_kind) do
+      transition_context(run_state.context_key, run_state.recipient, issue, &ContextManager.resume_started/1)
+    end
+
     with {:ok, turn_session} <-
            AppServer.run_turn(
              run_state.session,
              prompt,
              issue,
-             on_message: codex_message_handler(run_state.recipient, issue, run_state.context_key)
+             on_message: codex_message_handler(run_state.recipient, issue, run_state.context_key),
+             interrupt_when: fn -> ContextManager.checkpoint_pending?(Process.get(run_state.context_key)) end
            ) do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{run_state.workspace} turn=#{turn_number}/#{run_state.max_turns}")
-
-      if turn_kind == :resume do
-        transition_context(
-          run_state.context_key,
-          run_state.recipient,
-          issue,
-          &ContextManager.resume_completed/1
-        )
-      end
 
       case continue_with_issue?(issue, run_state.issue_state_fetcher) do
         {:continue, refreshed_issue} ->
@@ -244,13 +242,30 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
+  defp send_prompt_trace(recipient, %Issue{id: issue_id}, prompt, turn_number, turn_kind)
+       when is_binary(issue_id) and is_pid(recipient) and is_binary(prompt) do
+    send(recipient, {
+      :codex_worker_update,
+      issue_id,
+      %{
+        event: :prompt_sent,
+        payload: %{prompt: prompt, turn: turn_number, kind: if(is_tuple(turn_kind), do: :resume, else: turn_kind)},
+        timestamp: DateTime.utc_now()
+      }
+    })
+
+    :ok
+  end
+
+  defp send_prompt_trace(_recipient, _issue, _prompt, _turn_number, _turn_kind), do: :ok
+
   defp continue_after_turn(run_state, issue, turn_number) do
     context = Process.get(run_state.context_key)
 
     cond do
       ContextManager.checkpoint_pending?(context) ->
-        with :ok <- run_checkpoint_cycle(run_state, issue) do
-          do_run_codex_turns(run_state, issue, turn_number + 1, :resume)
+        with {:ok, checkpoint} <- run_checkpoint_cycle(run_state, issue) do
+          do_run_codex_turns(run_state, issue, turn_number + 1, {:resume, checkpoint})
         end
 
       turn_number < run_state.max_turns ->
@@ -297,7 +312,7 @@ defmodule SymphonyElixir.AgentRunner do
         &ContextManager.compaction_completed/1
       )
 
-      :ok
+      {:ok, checkpoint}
     end
   end
 
@@ -318,8 +333,10 @@ defmodule SymphonyElixir.AgentRunner do
       %{
         "type" => "text",
         "text" =>
-          "Create the durable pre-compaction checkpoint for Todoist task #{issue_id}. " <>
-            "Follow the checkpoint skill exactly and ensure the new comment starts with [SYMPHONY_CHECKPOINT_V1]."
+          "$checkpoint Create the durable pre-compaction checkpoint for Todoist task #{issue_id}. " <>
+            "Follow the checkpoint skill exactly and ensure the new comment starts with [SYMPHONY_CHECKPOINT_V1]. " <>
+            "Record unfinished operations and reconcile with the current workspace. " <>
+            "After saving the comment, end this turn immediately without continuing task work."
       }
     ]
   end
@@ -348,10 +365,10 @@ defmodule SymphonyElixir.AgentRunner do
   defp build_turn_prompt(issue, opts, 1, _max_turns, :normal),
     do: PromptBuilder.build_prompt(issue, opts)
 
-  defp build_turn_prompt(_issue, _opts, _turn_number, _max_turns, :resume) do
+  defp build_turn_prompt(issue, _opts, _turn_number, _max_turns, {:resume, checkpoint}) do
     """
-    Read the latest Todoist comment for this task whose first line is
-    [SYMPHONY_CHECKPOINT_V1].
+    Read Todoist comment #{checkpoint["id"]} for task #{issue.id}, the latest verified checkpoint
+    whose first line is [SYMPHONY_CHECKPOINT_V1].
 
     Treat it as the durable checkpoint from before context compaction. Reconcile it with the current
     repository/worktree state and git status. Continue from the recorded next action. Do not redo

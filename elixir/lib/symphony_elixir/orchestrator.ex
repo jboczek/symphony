@@ -13,6 +13,7 @@ defmodule SymphonyElixir.Orchestrator do
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
   @max_completed_sessions 50
+  @max_trace_events 200
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
   @empty_codex_totals %{
@@ -1099,6 +1100,7 @@ defmodule SymphonyElixir.Orchestrator do
             last_codex_message: nil,
             last_codex_timestamp: nil,
             last_codex_event: nil,
+            trace: [],
             codex_app_server_pid: nil,
             codex_input_tokens: 0,
             codex_cached_input_tokens: 0,
@@ -1684,6 +1686,19 @@ defmodule SymphonyElixir.Orchestrator do
       }),
       token_delta
     }
+    |> then(fn {entry, delta} -> {append_trace_event(entry, update), delta} end)
+  end
+
+  defp append_trace_event(running_entry, update) do
+    trace_event = %{
+      event: Map.get(update, :event),
+      timestamp: Map.get(update, :timestamp),
+      payload: Map.get(update, :payload) || Map.get(update, :raw)
+    }
+
+    Map.update(running_entry, :trace, [trace_event], fn trace ->
+      (trace ++ [trace_event]) |> Enum.take(@max_trace_events)
+    end)
   end
 
   defp codex_app_server_pid_for_update(_existing, %{codex_app_server_pid: pid})
@@ -1815,6 +1830,7 @@ defmodule SymphonyElixir.Orchestrator do
       last_codex_timestamp: Map.get(running_entry, :last_codex_timestamp),
       last_codex_message: Map.get(running_entry, :last_codex_message),
       last_codex_event: Map.get(running_entry, :last_codex_event),
+      trace: Map.get(running_entry, :trace, []),
       codex_input_tokens: Map.get(running_entry, :codex_input_tokens, 0),
       codex_cached_input_tokens: Map.get(running_entry, :codex_cached_input_tokens, 0),
       codex_output_tokens: Map.get(running_entry, :codex_output_tokens, 0),

@@ -262,6 +262,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert state_payload == %{
              "generated_at" => state_payload["generated_at"],
+             "historical_sessions" => state_payload["historical_sessions"],
              "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1},
              "running" => [
                %{
@@ -353,6 +354,13 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "last_event" => "turn_completed",
                  "last_message" => "turn completed (failed)",
                  "last_event_at" => state_payload["completed_sessions"] |> List.first() |> Map.fetch!("last_event_at"),
+                 "trace" => [
+                   %{
+                     "event" => "prompt_sent",
+                     "at" => state_payload["completed_sessions"] |> List.first() |> get_in(["trace", Access.at(0), "at"]),
+                     "payload" => %{"prompt" => "Investigate the failing test", "turn" => 1, "kind" => "normal"}
+                   }
+                 ],
                  "tokens" => %{
                    "input_tokens" => 40,
                    "cached_input_tokens" => 10,
@@ -586,6 +594,31 @@ defmodule SymphonyElixir.ExtensionsTest do
     refute html =~ "Transport"
     assert html =~ "status-badge-live"
     assert html =~ "status-badge-offline"
+
+    trace_html =
+      view
+      |> element("button[phx-value-issue-id=issue-completed]")
+      |> render_click()
+
+    assert trace_html =~ "Completed run"
+    assert trace_html =~ "Prompt sent to the agent"
+    assert trace_html =~ "Investigate the failing test"
+
+    view
+    |> element("button.trace-close")
+    |> render_click()
+
+    refute render(view) =~ "trace-modal"
+
+    view
+    |> element("button[phx-value-issue-id=issue-completed]")
+    |> render_click()
+
+    view
+    |> element("button.trace-backdrop")
+    |> render_click()
+
+    refute render(view) =~ "trace-modal"
 
     updated_snapshot =
       put_in(snapshot.running, [
@@ -844,6 +877,13 @@ defmodule SymphonyElixir.ExtensionsTest do
             }
           },
           last_codex_timestamp: DateTime.utc_now() |> DateTime.add(-1, :second),
+          trace: [
+            %{
+              event: :prompt_sent,
+              timestamp: DateTime.utc_now() |> DateTime.add(-90, :second),
+              payload: %{prompt: "Investigate the failing test", turn: 1, kind: :normal}
+            }
+          ],
           codex_input_tokens: 40,
           codex_cached_input_tokens: 10,
           codex_output_tokens: 8,

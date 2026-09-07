@@ -1,6 +1,6 @@
 ---
 name: verify-code-review
-description: Review committed implementation changes against requirements and material technical risks. Prefer the active pull request as the review scope when available, otherwise compare the current branch with the repository primary branch. Use one reviewer only. Use when Codex should independently review implementation changes or when review is nested inside verify.
+description: Review committed implementation changes against requirements and material technical risks. Prefer the active pull request as the review scope when available, but if the current branch has local commits beyond the PR head, review the local branch tip because those commits are still part of the same PR work. Otherwise compare the current branch with the repository primary branch. Use one reviewer only. Use when Codex should independently review implementation changes or when review is nested inside verify.
 ---
 
 # Code Review
@@ -69,9 +69,18 @@ When `gh` is available and the current branch has an open pull request, inspect:
 gh pr view --json number,url,state,baseRefName,baseRefOid,headRefName,headRefOid
 ```
 
-Use:
-- `baseRefOid` as `base_sha`;
-- `headRefOid` as `head_sha`.
+Use `baseRefOid` as `base_sha`.
+
+Then check whether the current branch tip contains additional local commits beyond the PR head:
+
+```bash
+git rev-list --left-right --count <headRefOid>...HEAD
+```
+
+- If `HEAD` is ahead of the PR head, treat those local commits as part of the same PR work and set `head_sha` to `HEAD`.
+- Otherwise keep `headRefOid` as `head_sha`.
+
+This prevents a stale remote PR head from hiding new local commits that are still part of the same branch/PR.
 
 #### Azure DevOps
 
@@ -82,7 +91,7 @@ When the repository remote is Azure DevOps and `az repos` is already available, 
 git prget
 ```
 
-Use the PR target/source commit IDs from the returned PR metadata as `base_sha` and `head_sha`.
+Use the PR target/source commit IDs from the returned PR metadata as `base_sha` and `head_sha`, but apply the same rule: if the local branch tip has additional commits beyond the PR head, use `HEAD` as the effective `head_sha`.
 
 If more than one active PR matches the current branch, do not guess. Record the ambiguity and return `Inconclusive` unless explicit revisions were supplied.
 

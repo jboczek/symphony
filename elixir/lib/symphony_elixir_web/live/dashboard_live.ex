@@ -5,6 +5,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   use Phoenix.LiveView, layout: {SymphonyElixirWeb.Layouts, :app}
 
+  alias SymphonyElixir.{CodexSessionHistory}
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
   @runtime_tick_ms 1_000
 
@@ -14,6 +15,8 @@ defmodule SymphonyElixirWeb.DashboardLive do
       socket
       |> assign(:payload, load_payload())
       |> assign(:now, DateTime.utc_now())
+      |> assign(:selected_trace, nil)
+      |> assign(:raw_trace, nil)
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
@@ -26,16 +29,48 @@ defmodule SymphonyElixirWeb.DashboardLive do
   @impl true
   def handle_info(:runtime_tick, socket) do
     schedule_runtime_tick()
-    {:noreply, assign(socket, :now, DateTime.utc_now())}
+
+    if socket.assigns.selected_trace do
+      {:noreply, socket}
+    else
+      {:noreply, assign(socket, :now, DateTime.utc_now())}
+    end
   end
 
   @impl true
   def handle_info(:observability_updated, socket) do
-    {:noreply,
-     socket
-     |> assign(:payload, load_payload())
-     |> assign(:now, DateTime.utc_now())}
+    if socket.assigns.selected_trace do
+      {:noreply, socket}
+    else
+      {:noreply,
+       socket
+       |> assign(:payload, load_payload())
+       |> assign(:now, DateTime.utc_now())}
+    end
   end
+
+  @impl true
+  def handle_event("open-trace", %{"issue-id" => issue_id}, socket) do
+    selected_trace =
+      Enum.find(socket.assigns.payload.completed_sessions ++ (socket.assigns.payload[:historical_sessions] || []), fn entry ->
+        to_string(entry[:issue_id]) == issue_id or
+          to_string(entry[:session_id]) == issue_id
+      end)
+
+    {:noreply, socket |> assign(:selected_trace, selected_trace) |> assign(:raw_trace, nil)}
+  end
+
+  @impl true
+  def handle_event("close-trace", _params, socket) do
+    {:noreply, socket |> assign(:selected_trace, nil) |> assign(:raw_trace, nil)}
+  end
+
+  @impl true
+  def handle_event("show-raw-trace", _params, %{assigns: %{selected_trace: %{log_path: path}}} = socket) do
+    {:noreply, assign(socket, :raw_trace, CodexSessionHistory.raw_events(path))}
+  end
+
+  def handle_event("show-raw-trace", _params, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do
@@ -77,6 +112,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <strong><%= @payload.error.code %>:</strong> <%= @payload.error.message %>
           </p>
         </section>
+
       <% else %>
         <section class="metric-grid">
           <article class="metric-card">
@@ -392,7 +428,13 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   <tr :for={entry <- @payload.completed_sessions}>
                     <td>
                       <div class="issue-stack">
-                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                        <button
+                          type="button"
+                          class="trace-link"
+                          phx-click="open-trace"
+                          phx-value-issue-id={entry.issue_id}
+                          aria-label={"Open run trace for #{entry.issue_identifier}"}
+                        ><%= entry.issue_identifier %></button>
                         <span class="muted"><%= entry.last_message || "n/a" %></span>
                       </div>
                     </td>
@@ -432,6 +474,80 @@ defmodule SymphonyElixirWeb.DashboardLive do
             </div>
           <% end %>
         </section>
+
+        <section class="section-card">
+          <div class="section-header"><div><h2 class="section-title">Historical Sessions</h2><p class="section-copy">The 10 latest Symphony sessions found in this machine’s Codex history.</p></div></div>
+          <%= if (@payload[:historical_sessions] || []) == [] do %>
+            <p class="empty-state">No persisted Symphony sessions found in the local Codex history.</p>
+          <% else %>
+            <div class="table-wrap"><table class="data-table" style="min-width: 720px;"><thead><tr><th>Task</th><th>Result</th><th>Completed</th><th>Activity</th></tr></thead><tbody>
+              <tr :for={entry <- @payload.historical_sessions}><td><button type="button" class="trace-link" phx-click="open-trace" phx-value-issue-id={entry.session_id}><%= entry.title %></button><br /><span class="muted"><%= entry.issue_identifier %></span></td><td><span class={state_badge_class(entry.status)}><%= entry.status %></span></td><td class="mono"><%= entry.completed_at || "n/a" %></td><td><%= length(entry.messages) %> updates · <%= length(entry.commands) %> commands</td></tr>
+            </tbody></table></div>
+          <% end %>
+        </section>
+
+        <%= if @selected_trace do %>
+          <section
+            class="trace-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="trace-title"
+            phx-window-keydown="close-trace"
+            phx-key="escape"
+          >
+            <button class="trace-backdrop" type="button" phx-click="close-trace" aria-label="Close run trace"></button>
+            <article class="trace-panel">
+              <header class="trace-header">
+                <div>
+                  <p class="trace-eyebrow">Completed run · <%= @selected_trace.status %></p>
+                  <h2 id="trace-title" class="trace-title"><%= @selected_trace[:title] || @selected_trace.issue_identifier %></h2>
+                  <p class="trace-meta mono"><%= @selected_trace.completed_at || "Completion time unavailable" %> · <%= @selected_trace[:turn_count] || "native history" %></p>
+                </div>
+                <button class="trace-close" type="button" phx-click="close-trace">Close</button>
+              </header>
+
+              <div class="trace-summary">
+                <span>Session <code><%= @selected_trace.session_id || "n/a" %></code></span>
+                <span><%= format_runtime_seconds(@selected_trace[:runtime_seconds] || 0) %></span>
+                <span><%= trace_count(@selected_trace) %> captured events</span>
+              </div>
+
+              <%= if @selected_trace[:messages] do %>
+                <ol class="trace-timeline">
+                  <li :for={message <- @selected_trace.messages} class="trace-event trace-event-accent">
+                    <div class="trace-rail" aria-hidden="true"></div>
+                    <div class="trace-event-head"><span class="trace-event-kind">Agent update</span><time class="trace-event-time mono"><%= message.at %></time></div>
+                    <div class="trace-message"><%= message.text %></div>
+                  </li>
+                </ol>
+                <details class="trace-commands"><summary>Input prompt</summary><pre><%= @selected_trace.prompt %></pre></details>
+                <details class="trace-commands"><summary>Technical actions · <%= length(@selected_trace.commands) %> commands</summary><ol><li :for={command <- @selected_trace.commands}><time class="mono"><%= command.at %></time><pre><%= command.input %></pre></li></ol></details>
+                <button class="secondary trace-raw-button" type="button" phx-click="show-raw-trace">Show full native log</button>
+                <pre :if={@raw_trace} class="trace-payload"><%= pretty_value(@raw_trace) %></pre>
+              <% else %>
+                <%= if @selected_trace.trace == [] do %>
+                  <p class="empty-state">This run predates trace capture, so only its final status is available.</p>
+                <% else %>
+                  <ol class="trace-timeline">
+                    <li :for={trace <- @selected_trace.trace} class={"trace-event trace-event-#{trace_tone(trace.event)}"}>
+                    <div class="trace-rail" aria-hidden="true"></div>
+                    <div class="trace-event-head">
+                      <span class="trace-event-kind"><%= trace_label(trace.event) %></span>
+                      <time class="trace-event-time mono"><%= trace.at || "—" %></time>
+                    </div>
+                    <%= if trace.event == :prompt_sent do %>
+                      <div class="trace-prompt-label">Prompt sent to the agent · turn <%= trace_value(trace.payload, :turn) || "?" %></div>
+                      <pre class="trace-prompt"><%= trace_value(trace.payload, :prompt) %></pre>
+                    <% else %>
+                      <pre class="trace-payload"><%= pretty_value(trace.payload) %></pre>
+                    <% end %>
+                    </li>
+                  </ol>
+                <% end %>
+              <% end %>
+            </article>
+          </section>
+        <% end %>
       <% end %>
     </section>
     """
@@ -550,6 +666,28 @@ defmodule SymphonyElixirWeb.DashboardLive do
       true -> base
     end
   end
+
+  defp trace_label(:prompt_sent), do: "Prompt"
+  defp trace_label(:tool_call_started), do: "Tool call started"
+  defp trace_label(:tool_call_completed), do: "Tool call completed"
+  defp trace_label(:agent_message_delta), do: "Agent update"
+  defp trace_label(:turn_completed), do: "Turn completed"
+  defp trace_label(:turn_failed), do: "Turn failed"
+  defp trace_label(event), do: event |> to_string() |> String.replace("_", " ")
+
+  defp trace_tone(event) when event in [:turn_failed, :turn_cancelled], do: "danger"
+  defp trace_tone(event) when event in [:prompt_sent, :tool_call_started], do: "accent"
+  defp trace_tone(_event), do: "neutral"
+
+  defp trace_value(payload, key) when is_map(payload) do
+    Map.get(payload, key) || Map.get(payload, to_string(key))
+  end
+
+  defp trace_value(_payload, _key), do: nil
+
+  defp trace_count(%{messages: messages, commands: commands}) when is_list(messages) and is_list(commands), do: length(messages) + length(commands)
+  defp trace_count(%{trace: trace}) when is_list(trace), do: length(trace)
+  defp trace_count(_trace), do: 0
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)

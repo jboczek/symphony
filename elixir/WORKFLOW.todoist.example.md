@@ -224,7 +224,8 @@ Before implementation:
 10. Before handoff, ensure all task-owned repository changes are committed. Do not run the `push`
     skill during `InProgress` or `Rework`.
 11. Update the Workpad with completed checkboxes and concise evidence.
-12. Only after all quality gates pass, move the task to `Verify` and end the turn. `Verify` is a
+12. Add new comment with the consise message about what you've done and why.
+13. Only after all quality gates pass, move the task to `Verify` and end the turn. `Verify` is a
     session boundary; Symphony will end this implementation session and start a separate verifier.
 
 Do not move directly from `InProgress` or `Rework` to `HumanReview` merely because text or code was
@@ -271,8 +272,9 @@ When the task is in `Rework`:
 3. Inspect current repository/deliverable state and identify what must change this attempt.
 4. Update the Workpad plan and acceptance criteria before editing.
 5. Implement the requested changes, rerun all relevant validation, and self-review again.
-6. Update the same Workpad with new evidence and move to `Verify` only when complete. End the turn
-   so Symphony can start a separate verifier session.
+6. Update the same Workpad with new evidence and move to `Verify` only when complete. 
+7. Add new task comment with the consise message about what you've done and why.
+8. End the turn so Symphony can start a separate verifier session.
 
 ## Blocked flow
 
